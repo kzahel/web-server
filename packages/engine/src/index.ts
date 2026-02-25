@@ -1,5 +1,7 @@
-// Interfaces
+// Certificate / TLS
 
+export { NodeCertificateProvider } from "./adapters/node/node-certificate-provider.js";
+// Interfaces
 export {
   NodeFileHandle,
   NodeFileSystem,
@@ -15,10 +17,13 @@ export type { ServerConfig } from "./config/server-config.js";
 export { defaultConfig } from "./config/server-config.js";
 export { parseHttpRequest } from "./http/request-parser.js";
 export { sendFileResponse, sendResponse } from "./http/response-writer.js";
-
 // HTTP
 export type { HttpRequest, HttpResponseOptions } from "./http/types.js";
 export { STATUS_TEXT } from "./http/types.js";
+export type {
+  ICertificateProvider,
+  TlsOptions,
+} from "./interfaces/certificate.js";
 export type {
   IFileHandle,
   IFileStat,

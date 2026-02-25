@@ -2,6 +2,7 @@
  * Native socket factory for QuickJS/Android.
  */
 
+import type { TlsOptions } from "../../interfaces/certificate.js";
 import type {
   ISocketFactory,
   ITcpServer,
@@ -23,8 +24,20 @@ export class NativeSocketFactory implements ISocketFactory {
     throw new Error("Client TCP sockets not supported in server mode");
   }
 
-  createTcpServer(): ITcpServer {
-    const serverId = parseInt(__ok200_tcp_server_create(), 10);
+  createTcpServer(tlsOptions?: TlsOptions): ITcpServer {
+    let serverId: number;
+    if (tlsOptions) {
+      const decoder = new TextDecoder();
+      serverId = parseInt(
+        __ok200_tcp_server_create_tls(
+          decoder.decode(tlsOptions.cert),
+          decoder.decode(tlsOptions.key),
+        ),
+        10,
+      );
+    } else {
+      serverId = parseInt(__ok200_tcp_server_create(), 10);
+    }
     const server = new NativeTcpServer(serverId);
     this.servers.set(serverId, server);
     return server;

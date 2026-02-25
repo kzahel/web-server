@@ -70,6 +70,18 @@ declare function __ok200_file_readdir(path: string): string | null;
 declare function __ok200_file_realpath(path: string): string | null;
 declare function __ok200_file_list_tree(path: string): string;
 
+// TLS Certificate Generation
+declare function __ok200_tls_generate_self_signed(
+  sanJson: string,
+  validityDays: string,
+): string; // JSON: { cert: string, key: string }
+
+// TLS Server
+declare function __ok200_tcp_server_create_tls(
+  certPem: string,
+  keyPem: string,
+): string; // returns serverId
+
 // Engine Callbacks
 declare function __ok200_report_state(stateJson: string): void;
 declare function __ok200_report_error(message: string): void;

@@ -1,9 +1,14 @@
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   basicLogger,
   createNodeServer,
   defaultConfig,
+  type Logger,
+  NodeCertificateProvider,
   prefixedLogger,
+  type TlsOptions,
 } from "@ok200/engine";
 
 declare const OK200_VERSION: string;
@@ -17,6 +22,9 @@ function parseArgs(args: string[]): {
   upload: boolean;
   noListing: boolean;
   quiet: boolean;
+  https: boolean;
+  certPath?: string;
+  keyPath?: string;
 } {
   let root = ".";
   let port = 8080;
@@ -26,6 +34,9 @@ function parseArgs(args: string[]): {
   let upload = false;
   let noListing = false;
   let quiet = false;
+  let https = false;
+  let certPath: string | undefined;
+  let keyPath: string | undefined;
 
   let i = 0;
   while (i < args.length) {
@@ -48,6 +59,12 @@ function parseArgs(args: string[]): {
       noListing = true;
     } else if (arg === "--quiet" || arg === "-q") {
       quiet = true;
+    } else if (arg === "--https" || arg === "-S") {
+      https = true;
+    } else if (arg === "--cert") {
+      certPath = args[++i];
+    } else if (arg === "--key") {
+      keyPath = args[++i];
     } else if (arg === "--version" || arg === "-v") {
       console.log(OK200_VERSION);
       process.exit(0);
@@ -64,7 +81,19 @@ function parseArgs(args: string[]): {
     i++;
   }
 
-  return { root, port, host, cors, spa, upload, noListing, quiet };
+  return {
+    root,
+    port,
+    host,
+    cors,
+    spa,
+    upload,
+    noListing,
+    quiet,
+    https,
+    certPath,
+    keyPath,
+  };
 }
 
 function printHelp(): void {
@@ -81,25 +110,81 @@ Options:
   --upload             Enable file uploads via PUT/POST
   --no-listing         Disable directory listing
   --quiet, -q          Suppress request logging
+  --https, -S          Enable HTTPS with auto-generated self-signed cert
+  --cert <path>        Path to PEM certificate file (use with --key)
+  --key <path>         Path to PEM private key file (use with --cert)
   --version, -v        Show version
   --help, -h           Show this help
 `);
 }
 
+const CACHE_DIR = path.join(os.homedir(), ".ok200");
+const CERT_PATH = path.join(CACHE_DIR, "localhost.pem");
+const KEY_PATH = path.join(CACHE_DIR, "localhost-key.pem");
+const MAX_AGE_MS = 364 * 24 * 60 * 60 * 1000; // ~1 year
+
+async function getOrGenerateCert(logger: Logger): Promise<TlsOptions> {
+  // Try loading cached cert
+  try {
+    const [cert, key, stat] = await Promise.all([
+      fs.readFile(CERT_PATH),
+      fs.readFile(KEY_PATH),
+      fs.stat(CERT_PATH),
+    ]);
+
+    if (Date.now() - stat.mtimeMs < MAX_AGE_MS) {
+      logger.info("Using cached self-signed certificate from ~/.ok200/");
+      return {
+        cert: new Uint8Array(cert),
+        key: new Uint8Array(key),
+      };
+    }
+  } catch {
+    // No cached cert, generate new one
+  }
+
+  logger.info("Generating self-signed certificate...");
+  const provider = new NodeCertificateProvider();
+  const tlsOptions = await provider.generateSelfSigned();
+
+  await fs.mkdir(CACHE_DIR, { recursive: true, mode: 0o700 });
+  await fs.writeFile(CERT_PATH, tlsOptions.cert, { mode: 0o600 });
+  await fs.writeFile(KEY_PATH, tlsOptions.key, { mode: 0o600 });
+
+  logger.info("Self-signed certificate saved to ~/.ok200/");
+  return tlsOptions;
+}
+
+async function resolveTls(
+  args: { https: boolean; certPath?: string; keyPath?: string },
+  logger: Logger,
+): Promise<TlsOptions | undefined> {
+  if (!args.https && !args.certPath && !args.keyPath) {
+    return undefined;
+  }
+
+  if (args.certPath && args.keyPath) {
+    const [cert, key] = await Promise.all([
+      fs.readFile(args.certPath),
+      fs.readFile(args.keyPath),
+    ]);
+    return {
+      cert: new Uint8Array(cert),
+      key: new Uint8Array(key),
+    };
+  }
+
+  if (args.certPath || args.keyPath) {
+    console.error("Both --cert and --key must be provided together");
+    process.exit(1);
+  }
+
+  return getOrGenerateCert(logger);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const root = path.resolve(args.root);
-
-  const config = {
-    ...defaultConfig(root),
-    port: args.port,
-    host: args.host,
-    cors: args.cors,
-    spa: args.spa,
-    upload: args.upload,
-    directoryListing: !args.noListing,
-    quiet: args.quiet,
-  };
 
   const logger = args.quiet
     ? {
@@ -110,15 +195,30 @@ async function main(): Promise<void> {
       }
     : prefixedLogger("ok200", basicLogger());
 
+  const tls = await resolveTls(args, logger);
+
+  const config = {
+    ...defaultConfig(root),
+    port: args.port,
+    host: args.host,
+    cors: args.cors,
+    spa: args.spa,
+    upload: args.upload,
+    directoryListing: !args.noListing,
+    quiet: args.quiet,
+    tls,
+  };
+
   const server = createNodeServer({ config, logger });
 
   const port = await server.start();
 
-  const url = `http://${config.host === "0.0.0.0" ? "localhost" : config.host}:${port}`;
+  const protocol = config.tls ? "https" : "http";
+  const url = `${protocol}://${config.host === "0.0.0.0" ? "localhost" : config.host}:${port}`;
   console.log(`\n  ok200 serving ${root}\n`);
   console.log(`  Local:   ${url}`);
   if (config.host === "0.0.0.0") {
-    console.log(`  Network: http://0.0.0.0:${port}`);
+    console.log(`  Network: ${protocol}://0.0.0.0:${port}`);
   }
   console.log();
 

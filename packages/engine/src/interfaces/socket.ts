@@ -5,6 +5,8 @@
  * from any specific runtime (Node, Bun, QuickJS, JSC).
  */
 
+import type { TlsOptions } from "./certificate.js";
+
 export interface ITcpSocket {
   /** Send data to the remote peer. */
   send(data: Uint8Array): void;
@@ -78,8 +80,8 @@ export interface ISocketFactory {
   /** Create a new TCP socket. */
   createTcpSocket(options?: TcpSocketOptions): Promise<ITcpSocket>;
 
-  /** Create a TCP server. */
-  createTcpServer(): ITcpServer;
+  /** Create a TCP server. When tlsOptions is provided, create a TLS server. */
+  createTcpServer(tlsOptions?: TlsOptions): ITcpServer;
 
   /** Wrap a native socket into ITcpSocket. */
   wrapTcpSocket(socket: unknown): ITcpSocket;

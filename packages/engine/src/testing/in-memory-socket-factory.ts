@@ -1,3 +1,4 @@
+import type { TlsOptions } from "../interfaces/certificate.js";
 import type {
   ISocketFactory,
   ITcpServer,
@@ -147,7 +148,7 @@ export class InMemorySocketFactory implements ISocketFactory {
     return new InMemoryTcpSocket();
   }
 
-  createTcpServer(): ITcpServer {
+  createTcpServer(_tlsOptions?: TlsOptions): ITcpServer {
     const server = new InMemoryTcpServer(() => this.nextPort++);
     this.server = server;
     return server;

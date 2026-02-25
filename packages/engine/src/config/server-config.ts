@@ -1,3 +1,5 @@
+import type { TlsOptions } from "../interfaces/certificate.js";
+
 export interface ServerConfig {
   /** Port to listen on. Default: 8080 */
   port: number;
@@ -19,6 +21,8 @@ export interface ServerConfig {
   requestTimeoutMs: number;
   /** Max buffered request body size for non-streaming handlers. Default: 10MB */
   maxRequestBodySize: number;
+  /** TLS options. When set, the server listens for HTTPS. */
+  tls?: TlsOptions;
 }
 
 export function defaultConfig(root: string): ServerConfig {

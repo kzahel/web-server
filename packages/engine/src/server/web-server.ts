@@ -59,7 +59,7 @@ export class WebServer extends EventEmitter {
     }
 
     return new Promise((resolve, reject) => {
-      const server = this.socketFactory.createTcpServer();
+      const server = this.socketFactory.createTcpServer(this.config.tls);
       this.tcpServer = server;
 
       let settled = false;

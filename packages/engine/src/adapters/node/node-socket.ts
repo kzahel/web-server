@@ -1,5 +1,6 @@
 import * as net from "node:net";
 import * as tls from "node:tls";
+import type { TlsOptions } from "../../interfaces/certificate.js";
 import type {
   ISocketFactory,
   ITcpServer,
@@ -173,9 +174,19 @@ export class NodeTcpSocket implements ITcpSocket {
 
 export class NodeTcpServer implements ITcpServer {
   private server: net.Server;
+  private isTls: boolean;
 
-  constructor() {
-    this.server = net.createServer();
+  constructor(tlsOptions?: TlsOptions) {
+    if (tlsOptions) {
+      this.server = tls.createServer({
+        cert: Buffer.from(tlsOptions.cert),
+        key: Buffer.from(tlsOptions.key),
+      });
+      this.isTls = true;
+    } else {
+      this.server = net.createServer();
+      this.isTls = false;
+    }
   }
 
   listen(port: number, host?: string, callback?: () => void): void {
@@ -197,7 +208,9 @@ export class NodeTcpServer implements ITcpServer {
     cb: ((socket: unknown) => void) | ((err: Error) => void),
   ): void {
     if (event === "connection") {
-      this.server.on("connection", cb as (socket: net.Socket) => void);
+      // tls.Server emits "secureConnection" for completed TLS handshakes
+      const eventName = this.isTls ? "secureConnection" : "connection";
+      this.server.on(eventName, cb as (socket: net.Socket) => void);
       return;
     }
     this.server.on("error", cb as (err: Error) => void);
@@ -217,8 +230,8 @@ export class NodeSocketFactory implements ISocketFactory {
     return socket;
   }
 
-  createTcpServer(): ITcpServer {
-    return new NodeTcpServer();
+  createTcpServer(tlsOptions?: TlsOptions): ITcpServer {
+    return new NodeTcpServer(tlsOptions);
   }
 
   wrapTcpSocket(socket: unknown): ITcpSocket {
