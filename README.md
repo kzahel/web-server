@@ -38,7 +38,8 @@ ok200 ./dist --spa --cors      # SPA mode with CORS headers
 ```sh
 pnpm install
 pnpm build       # compile TypeScript
-pnpm test        # run unit + e2e tests
+pnpm test        # fast tests (no real socket binding)
+OK200_SOCKET_TESTS=1 pnpm test  # include real socket bind tests
 pnpm typecheck   # type check
 pnpm lint        # lint with Biome
 ```

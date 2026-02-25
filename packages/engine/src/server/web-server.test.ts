@@ -1,21 +1,76 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { NodeFileSystem } from "../adapters/node/node-filesystem.js";
 import { defaultConfig } from "../config/server-config.js";
-import { createNodeServer } from "../presets/node.js";
-import type { WebServer } from "./web-server.js";
+import { decodeToString } from "../utils/buffer.js";
+import { InMemorySocketFactory } from "../testing/in-memory-socket-factory.js";
+import { WebServer } from "./web-server.js";
 
-let server: WebServer;
-let port: number;
+interface ParsedResponse {
+  status: number;
+  headers: Map<string, string>;
+  body: string;
+}
+
+function parseResponse(raw: Uint8Array): ParsedResponse {
+  const text = decodeToString(raw);
+  const splitAt = text.indexOf("\r\n\r\n");
+  if (splitAt === -1) {
+    throw new Error("Invalid HTTP response: missing header separator");
+  }
+
+  const headerPart = text.slice(0, splitAt);
+  const bodyPart = text.slice(splitAt + 4);
+  const lines = headerPart.split("\r\n");
+  const statusLine = lines[0];
+  const status = Number.parseInt(statusLine.split(" ")[1] ?? "", 10);
+  if (Number.isNaN(status)) {
+    throw new Error(`Invalid status line: ${statusLine}`);
+  }
+
+  const headers = new Map<string, string>();
+  for (let i = 1; i < lines.length; i++) {
+    const colon = lines[i].indexOf(":");
+    if (colon === -1) continue;
+    const key = lines[i].slice(0, colon).trim().toLowerCase();
+    const value = lines[i].slice(colon + 1).trim();
+    headers.set(key, value);
+  }
+
+  return { status, headers, body: bodyPart };
+}
+
+async function withServer(
+  root: string,
+  configOverrides: Partial<ReturnType<typeof defaultConfig>>,
+  testBody: (ctx: { request: (rawHttp: string) => Promise<ParsedResponse> }) => Promise<void>,
+): Promise<void> {
+  const socketFactory = new InMemorySocketFactory();
+  const server = new WebServer({
+    socketFactory,
+    fileSystem: new NodeFileSystem(),
+    config: {
+      ...defaultConfig(root),
+      quiet: true,
+      port: 0,
+      ...configOverrides,
+    },
+  });
+
+  await server.start();
+
+  try {
+    await testBody({
+      request: async (rawHttp: string) =>
+        parseResponse(await socketFactory.request(rawHttp)),
+    });
+  } finally {
+    await server.stop();
+  }
+}
+
 let tmpDir: string;
 
 beforeAll(async () => {
@@ -26,46 +81,29 @@ afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-describe("WebServer integration", () => {
-  beforeEach(async () => {
-    const config = {
-      ...defaultConfig(tmpDir),
-      port: 0, // random port
-      quiet: true,
-    };
-    server = createNodeServer({ config });
-    port = await server.start();
-  });
-
-  afterEach(async () => {
-    await server.stop();
-  });
-
+describe("WebServer integration (in-memory)", () => {
   it("serves a file with correct content-type", async () => {
     await fs.writeFile(path.join(tmpDir, "hello.txt"), "Hello, world!");
 
-    const res = await fetch(`http://127.0.0.1:${port}/hello.txt`);
-    expect(res.status).toBe(200);
-
-    const body = await res.text();
-    expect(body).toBe("Hello, world!");
-
-    const contentType = res.headers.get("content-type");
-    expect(contentType).toContain("text/plain");
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request("GET /hello.txt HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("Hello, world!");
+      expect(res.headers.get("content-type")).toContain("text/plain");
+    });
   });
 
   it("serves index.html for directory", async () => {
     await fs.writeFile(path.join(tmpDir, "index.html"), "<h1>Home</h1>");
 
-    const res = await fetch(`http://127.0.0.1:${port}/`);
-    expect(res.status).toBe(200);
-
-    const body = await res.text();
-    expect(body).toBe("<h1>Home</h1>");
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request("GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("<h1>Home</h1>");
+    });
   });
 
   it("returns directory listing when no index.html", async () => {
-    // Remove index.html if it exists from previous test
     try {
       await fs.unlink(path.join(tmpDir, "index.html"));
     } catch {}
@@ -73,143 +111,107 @@ describe("WebServer integration", () => {
     await fs.writeFile(path.join(tmpDir, "file-a.txt"), "a");
     await fs.writeFile(path.join(tmpDir, "file-b.txt"), "b");
 
-    const res = await fetch(`http://127.0.0.1:${port}/`);
-    expect(res.status).toBe(200);
-
-    const body = await res.text();
-    expect(body).toContain("file-a.txt");
-    expect(body).toContain("file-b.txt");
-    expect(body).toContain("Index of /");
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request("GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(200);
+      expect(res.body).toContain("file-a.txt");
+      expect(res.body).toContain("file-b.txt");
+      expect(res.body).toContain("Index of /");
+    });
   });
 
   it("returns 404 for missing file", async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/nonexistent.txt`);
-    expect(res.status).toBe(404);
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "GET /nonexistent.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
+      expect(res.status).toBe(404);
+    });
   });
 
-  it("blocks path traversal via raw socket", async () => {
-    // fetch() normalizes URLs, so we must send raw bytes to test traversal
-    const net = await import("node:net");
-    const response = await new Promise<string>((resolve) => {
-      const sock = net.createConnection(port, "127.0.0.1", () => {
-        sock.write("GET /../../etc/passwd HTTP/1.1\r\nHost: localhost\r\n\r\n");
-      });
-      let data = "";
-      sock.on("data", (chunk) => {
-        data += chunk.toString();
-      });
-      sock.on("end", () => resolve(data));
+  it("blocks path traversal via raw request", async () => {
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "GET /../../etc/passwd HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
+      expect(res.body).not.toContain("root:");
+      expect([200, 404]).toContain(res.status);
     });
-
-    // decodeRequestPath resolves /../.. to / which hits root dir, not /etc/passwd
-    // The file /etc/passwd should never be accessible
-    expect(response).not.toContain("root:");
-    // Should get a valid HTTP response (either 200 dir listing or 404)
-    expect(response).toMatch(/^HTTP\/1\.1 (200|404)/);
   });
 
   it("handles HEAD request", async () => {
     await fs.writeFile(path.join(tmpDir, "head-test.txt"), "test content");
 
-    const res = await fetch(`http://127.0.0.1:${port}/head-test.txt`, {
-      method: "HEAD",
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "HEAD /head-test.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("");
+      expect(res.headers.get("content-length")).toBe("12");
     });
-    expect(res.status).toBe(200);
-
-    const body = await res.text();
-    expect(body).toBe("");
-
-    expect(res.headers.get("content-length")).toBe("12");
   });
 
   it("returns 405 for POST", async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/`, { method: "POST" });
-    expect(res.status).toBe(405);
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request("POST / HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(405);
+    });
   });
 
   it("serves JSON with correct content-type", async () => {
     await fs.writeFile(path.join(tmpDir, "data.json"), '{"ok":true}');
 
-    const res = await fetch(`http://127.0.0.1:${port}/data.json`);
-    expect(res.status).toBe(200);
-
-    const contentType = res.headers.get("content-type");
-    expect(contentType).toContain("application/json");
-
-    const body = await res.text();
-    expect(body).toBe('{"ok":true}');
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request("GET /data.json HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect(res.body).toBe('{"ok":true}');
+    });
   });
 
   it("serves subdirectory files", async () => {
     await fs.mkdir(path.join(tmpDir, "sub"), { recursive: true });
-    await fs.writeFile(
-      path.join(tmpDir, "sub", "nested.txt"),
-      "nested content",
-    );
+    await fs.writeFile(path.join(tmpDir, "sub", "nested.txt"), "nested content");
 
-    const res = await fetch(`http://127.0.0.1:${port}/sub/nested.txt`);
-    expect(res.status).toBe(200);
-
-    const body = await res.text();
-    expect(body).toBe("nested content");
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "GET /sub/nested.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("nested content");
+    });
   });
 });
 
-describe("WebServer SPA mode", () => {
-  beforeEach(async () => {
-    const config = {
-      ...defaultConfig(tmpDir),
-      port: 0,
-      quiet: true,
-      spa: true,
-    };
-    server = createNodeServer({ config });
-    port = await server.start();
-  });
-
-  afterEach(async () => {
-    await server.stop();
-  });
-
+describe("WebServer SPA mode (in-memory)", () => {
   it("serves index.html for missing paths in SPA mode", async () => {
     await fs.writeFile(path.join(tmpDir, "index.html"), '<div id="app"></div>');
 
-    const res = await fetch(`http://127.0.0.1:${port}/some/route`);
-    expect(res.status).toBe(200);
-
-    const body = await res.text();
-    expect(body).toBe('<div id="app"></div>');
+    await withServer(tmpDir, { spa: true }, async ({ request }) => {
+      const res = await request("GET /some/route HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(200);
+      expect(res.body).toBe('<div id="app"></div>');
+    });
   });
 });
 
-describe("WebServer CORS", () => {
-  beforeEach(async () => {
-    const config = {
-      ...defaultConfig(tmpDir),
-      port: 0,
-      quiet: true,
-      cors: true,
-    };
-    server = createNodeServer({ config });
-    port = await server.start();
-  });
-
-  afterEach(async () => {
-    await server.stop();
-  });
-
+describe("WebServer CORS (in-memory)", () => {
   it("includes CORS headers", async () => {
     await fs.writeFile(path.join(tmpDir, "cors.txt"), "test");
 
-    const res = await fetch(`http://127.0.0.1:${port}/cors.txt`);
-    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    await withServer(tmpDir, { cors: true }, async ({ request }) => {
+      const res = await request("GET /cors.txt HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    });
   });
 
   it("handles OPTIONS preflight", async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/anything`, {
-      method: "OPTIONS",
+    await withServer(tmpDir, { cors: true }, async ({ request }) => {
+      const res = await request("OPTIONS /anything HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(204);
+      expect(res.headers.get("access-control-allow-origin")).toBe("*");
+      expect(res.body).toBe("");
     });
-    expect(res.status).toBe(204);
-    expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 });

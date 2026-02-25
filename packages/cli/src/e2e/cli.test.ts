@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const CLI_PATH = new URL("../../dist/index.js", import.meta.url).pathname;
+const describeSocket = process.env.OK200_SOCKET_TESTS === "1" ? describe : describe.skip;
 
 interface ServerHandle {
   proc: ChildProcess;
@@ -69,7 +70,7 @@ afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-describe("ok200 CLI e2e", () => {
+describeSocket("ok200 CLI e2e", () => {
   it("serves a file with correct content-type", async () => {
     const s = await startServer(tmpDir, ["-q"]);
     try {
@@ -146,7 +147,7 @@ describe("ok200 CLI e2e", () => {
   });
 });
 
-describe("ok200 CLI --cors", () => {
+describeSocket("ok200 CLI --cors", () => {
   it("adds CORS headers", async () => {
     const s = await startServer(tmpDir, ["-q", "--cors"]);
     try {
@@ -158,7 +159,7 @@ describe("ok200 CLI --cors", () => {
   });
 });
 
-describe("ok200 CLI --spa", () => {
+describeSocket("ok200 CLI --spa", () => {
   it("rewrites missing paths to index.html", async () => {
     const s = await startServer(tmpDir, ["-q", "--spa"]);
     try {
@@ -171,7 +172,7 @@ describe("ok200 CLI --spa", () => {
   });
 });
 
-describe("ok200 CLI shutdown", () => {
+describeSocket("ok200 CLI shutdown", () => {
   it("terminates on SIGTERM", async () => {
     const s = await startServer(tmpDir, ["-q"]);
 
