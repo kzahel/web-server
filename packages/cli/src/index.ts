@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import * as path from "node:path";
 import {
   basicLogger,
@@ -7,6 +5,8 @@ import {
   defaultConfig,
   prefixedLogger,
 } from "@ok200/engine";
+
+declare const OK200_VERSION: string;
 
 function parseArgs(args: string[]): {
   root: string;
@@ -48,6 +48,9 @@ function parseArgs(args: string[]): {
       noListing = true;
     } else if (arg === "--quiet" || arg === "-q") {
       quiet = true;
+    } else if (arg === "--version" || arg === "-v") {
+      console.log(OK200_VERSION);
+      process.exit(0);
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -78,6 +81,7 @@ Options:
   --upload             Enable file uploads via PUT/POST
   --no-listing         Disable directory listing
   --quiet, -q          Suppress request logging
+  --version, -v        Show version
   --help, -h           Show this help
 `);
 }

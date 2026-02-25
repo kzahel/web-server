@@ -3,12 +3,30 @@
   "version": "0.0.1",
   "description": "Serve static files from the command line",
   "type": "module",
-  "main": "dist/index.js",
   "bin": {
-    "ok200": "./dist/index.js"
+    "ok200": "./dist/cli.js"
   },
+  "files": [
+    "dist/cli.js",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kzahel/web-server.git",
+    "directory": "packages/cli"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "http",
+    "server",
+    "static",
+    "cli"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node bundle/build-cli.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -17,6 +35,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.0.0",
     "vitest": "^1.0.0"
   }
