@@ -460,3 +460,49 @@ pub fn run() {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_settings_defaults() {
+        let s = Settings::default();
+        assert!(!s.autostart);
+        assert!(s.run_in_background);
+        assert!(s.show_in_menu_bar);
+    }
+
+    #[test]
+    fn test_settings_serde_backward_compat() {
+        // Unknown fields should be ignored (forward compatibility)
+        let json = r#"{"autostart": true, "run_in_background": false, "future_field": 42}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(s.autostart);
+        assert!(!s.run_in_background);
+        // show_in_menu_bar should get its default (true)
+        assert!(s.show_in_menu_bar);
+    }
+
+    #[test]
+    fn test_settings_serde_roundtrip() {
+        let s = Settings {
+            autostart: true,
+            run_in_background: false,
+            show_in_menu_bar: false,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.autostart, s.autostart);
+        assert_eq!(parsed.run_in_background, s.run_in_background);
+        assert_eq!(parsed.show_in_menu_bar, s.show_in_menu_bar);
+    }
+
+    #[test]
+    fn test_settings_missing_fields_get_defaults() {
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!s.autostart);
+        assert!(s.run_in_background);
+        assert!(s.show_in_menu_bar);
+    }
+}

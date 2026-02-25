@@ -29,3 +29,47 @@ pub fn get_or_create_cfu_id() -> Option<String> {
     std::fs::write(&path, &id).ok()?;
     Some(id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn test_get_config_dir_env_override() {
+        let key = "OK200_CONFIG_DIR";
+        let original = std::env::var(key).ok();
+
+        std::env::set_var(key, "/tmp/test-ok200-config");
+        let dir = get_config_dir().unwrap();
+        assert_eq!(dir, PathBuf::from("/tmp/test-ok200-config"));
+
+        match original {
+            Some(val) => std::env::set_var(key, val),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_get_or_create_cfu_id_persistence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let key = "OK200_CONFIG_DIR";
+        let original = std::env::var(key).ok();
+
+        std::env::set_var(key, tmp.path());
+
+        let id1 = get_or_create_cfu_id().expect("should create cfu-id");
+        assert!(!id1.is_empty());
+        assert_eq!(id1.len(), 36, "should be a UUID with hyphens");
+
+        let id2 = get_or_create_cfu_id().expect("should read existing cfu-id");
+        assert_eq!(id1, id2, "cfu-id must be stable across calls");
+
+        match original {
+            Some(val) => std::env::set_var(key, val),
+            None => std::env::remove_var(key),
+        }
+    }
+}
