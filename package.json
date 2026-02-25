@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm --filter @ok200/engine build && pnpm -r typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
     "check": "biome check --write ."
