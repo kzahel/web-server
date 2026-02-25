@@ -87,10 +87,12 @@ class FileManagerImpl(
 
     override fun realpath(rootUri: Uri, relativePath: String): String? {
         // For SAF URIs, we can't resolve symlinks. Return the normalized path.
-        // For native paths, resolve via canonical path.
+        // For native paths, resolve via canonical path (only if file exists).
         return try {
             if (rootUri.scheme == "file") {
-                resolveNativePath(rootUri, relativePath).canonicalPath
+                val file = resolveNativePath(rootUri, relativePath)
+                if (!file.exists()) return null
+                file.canonicalPath
             } else {
                 // SAF doesn't have symlinks; return the logical path
                 if (relativePath.isEmpty()) "/" else "/$relativePath"

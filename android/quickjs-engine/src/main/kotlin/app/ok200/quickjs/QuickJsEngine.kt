@@ -170,6 +170,22 @@ class QuickJsEngine : Closeable {
         jsThread.post(block)
     }
 
+    fun postAndWait(block: () -> Unit) {
+        val error = AtomicReference<Throwable?>()
+        val latch = CountDownLatch(1)
+        jsThread.post {
+            try {
+                block()
+            } catch (e: Throwable) {
+                error.set(e)
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await()
+        error.get()?.let { throw it }
+    }
+
     suspend fun callGlobalFunctionAsync(funcName: String, vararg args: String?): Any? {
         return suspendCancellableCoroutine { cont ->
             jsThread.post {

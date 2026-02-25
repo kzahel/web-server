@@ -3,7 +3,6 @@ project(quickjs-jni)
 
 # QuickJS-ng source files (minimal set needed for the library)
 set(QUICKJS_SRC
-    quickjs-ng/cutils.c
     quickjs-ng/dtoa.c
     quickjs-ng/libregexp.c
     quickjs-ng/libunicode.c

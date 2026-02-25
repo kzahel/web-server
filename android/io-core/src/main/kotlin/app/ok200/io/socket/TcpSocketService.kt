@@ -9,8 +9,6 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.ByteBuffer
-import java.nio.channels.SocketChannel
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -42,7 +40,8 @@ class TcpSocketService(
     override fun send(socketId: Int, data: ByteArray): Boolean {
         val conn = connections[socketId] ?: return false
         return try {
-            conn.channel.write(ByteBuffer.wrap(data))
+            conn.socket.getOutputStream().write(data)
+            conn.socket.getOutputStream().flush()
             true
         } catch (e: IOException) {
             Log.w(TAG, "send($socketId) failed: ${e.message}")
@@ -114,7 +113,7 @@ class TcpSocketService(
         val conn = connections.remove(socketId) ?: return
         conn.readJob?.cancel()
         try {
-            conn.channel.close()
+            conn.socket.close()
         } catch (_: IOException) {}
         socketCallback?.onTcpClose(socketId, hadError)
     }
@@ -134,15 +133,10 @@ class TcpSocketService(
                         clientSocket.receiveBufferSize = RECEIVE_BUFFER_SIZE
 
                         val socketId = nextSocketId.getAndIncrement()
-                        val channel = clientSocket.channel ?: SocketChannel.open().also {
-                            // If accept() returned a Socket without a channel, wrap it
-                            // This shouldn't normally happen with ServerSocket
-                        }
-
                         val peerAddr = clientSocket.inetAddress?.hostAddress ?: "unknown"
                         val peerPort = clientSocket.port
 
-                        val conn = ActiveConnection(socketId, clientSocket, channel)
+                        val conn = ActiveConnection(socketId, clientSocket)
                         connections[socketId] = conn
                         conn.startReadLoop()
 
@@ -166,8 +160,7 @@ class TcpSocketService(
 
     private inner class ActiveConnection(
         val socketId: Int,
-        val socket: Socket,
-        val channel: SocketChannel
+        val socket: Socket
     ) {
         var readJob: Job? = null
 

@@ -115,6 +115,7 @@ dependencies {
     implementation(libs.androidx.appcompat)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
