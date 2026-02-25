@@ -44,7 +44,7 @@ CLI first because it's the fastest iteration loop — no GUI overhead, just serv
 
 ### Phase 0: CLI Server (current)
 
-`200ok serve .` should just work. Replace `python -m http.server` and `npx serve`.
+`ok200 serve .` should just work. Replace `python -m http.server` and `npx serve`.
 
 - Serve static files from a directory (default: cwd)
 - `--port` (default: 8080), `--host` (default: 127.0.0.1)

@@ -3,7 +3,7 @@
 ## Phase 0: CLI Server (Start Here)
 
 CLI-first. Build the Rust binary, test everything without GUI overhead.
-`200ok serve .` should just work.
+`ok200 serve .` should just work.
 
 - [ ] Serve static files from a directory argument (default: cwd)
 - [ ] `--port` flag (default: 8080)
@@ -108,18 +108,18 @@ This is the key architectural decision. The server logic lives in Rust,
 the UI is platform-specific.
 
 ```
-200ok-core (Rust library crate - the server engine)
+ok200-core (Rust library crate - the server engine)
   |
-  +-- 200ok-cli (Rust binary crate - Phase 0, ships standalone)
-  |     `200ok serve . --port 3000 --cors`
+  +-- ok200-cli (Rust binary crate - Phase 0, ships standalone)
+  |     `ok200 serve . --port 3000 --cors`
   |
   +-- tauri-app (desktop: Windows/macOS/Linux - Phase 0.5)
-  |     +-- Rust backend (uses 200ok-core directly, no CLI shelling)
+  |     +-- Rust backend (uses ok200-core directly, no CLI shelling)
   |     +-- Web frontend (HTML/CSS/JS or framework)
   |
   +-- android-app (Android/ChromeOS - Phase 1+)
   |     +-- Kotlin/Java app
-  |     +-- 200ok-core via JNI
+  |     +-- ok200-core via JNI
   |
   +-- (future) ios-app
 ```
