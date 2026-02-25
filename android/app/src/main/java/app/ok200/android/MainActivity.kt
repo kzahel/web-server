@@ -1,0 +1,55 @@
+package app.ok200.android
+
+import android.content.Intent
+import android.os.Bundle
+import android.util.Log
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.ui.Modifier
+import app.ok200.android.ui.ServerScreen
+import app.ok200.android.ui.theme.Ok200Theme
+import app.ok200.android.viewmodel.ServerViewModel
+
+private const val TAG = "MainActivity"
+
+class MainActivity : AppCompatActivity() {
+
+    private val viewModel: ServerViewModel by viewModels()
+
+    private val folderPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // Take persistent permission so we can access this folder across restarts
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            contentResolver.takePersistableUriPermission(uri, flags)
+
+            // Extract a friendly display name
+            val displayName = uri.lastPathSegment?.substringAfterLast(':') ?: uri.toString()
+            viewModel.setRootUri(uri, displayName)
+            Log.i(TAG, "Folder selected: $displayName ($uri)")
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        setContent {
+            Ok200Theme {
+                Scaffold { innerPadding ->
+                    ServerScreen(
+                        viewModel = viewModel,
+                        onPickFolder = { folderPickerLauncher.launch(null) },
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                }
+            }
+        }
+    }
+}
