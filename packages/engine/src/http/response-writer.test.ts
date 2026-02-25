@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IFileHandle } from "../interfaces/filesystem.js";
 import type { ITcpSocket } from "../interfaces/socket.js";
-import { decodeToString } from "../utils/buffer.js";
+import { concat, decodeToString, fromString } from "../utils/buffer.js";
 import { sendFileResponse } from "./response-writer.js";
 
 class InMemoryFileHandle implements IFileHandle {
@@ -102,5 +102,34 @@ describe("sendFileResponse", () => {
 
     expect(sent.length).toBeGreaterThanOrEqual(2);
     expect(decodeToString(sent[0])).toContain("HTTP/1.1 200 OK");
+  });
+
+  it("supports sending a partial byte range", async () => {
+    const fileData = fromString("0123456789");
+    const handle = new InMemoryFileHandle(fileData);
+    const sent: Uint8Array[] = [];
+
+    const socket: ITcpSocket = {
+      send(data: Uint8Array) {
+        sent.push(data.slice());
+      },
+      onData() {},
+      onClose() {},
+      onError() {},
+      close() {},
+    };
+
+    await sendFileResponse(
+      socket,
+      { status: 206, statusText: "Partial Content" },
+      handle,
+      fileData.length,
+      { start: 3, end: 7 },
+    );
+
+    const raw = decodeToString(concat(sent));
+    expect(raw).toContain("HTTP/1.1 206 Partial Content");
+    expect(raw).toContain("content-length: 5");
+    expect(raw.endsWith("34567")).toBe(true);
   });
 });

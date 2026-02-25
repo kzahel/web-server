@@ -23,6 +23,7 @@ export const STATUS_TEXT: Record<number, string> = {
   403: "Forbidden",
   404: "Not Found",
   405: "Method Not Allowed",
+  416: "Range Not Satisfiable",
   413: "Content Too Large",
   500: "Internal Server Error",
 };

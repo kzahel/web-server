@@ -351,6 +351,62 @@ describe("WebServer integration (in-memory)", () => {
     });
   });
 
+  it("serves single-byte ranges with 206 and Content-Range", async () => {
+    await fs.writeFile(path.join(tmpDir, "range.txt"), "0123456789");
+
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "GET /range.txt HTTP/1.1\r\nHost: local\r\nRange: bytes=2-5\r\n\r\n",
+      );
+      expect(res.status).toBe(206);
+      expect(res.body).toBe("2345");
+      expect(res.headers.get("accept-ranges")).toBe("bytes");
+      expect(res.headers.get("content-range")).toBe("bytes 2-5/10");
+      expect(res.headers.get("content-length")).toBe("4");
+    });
+  });
+
+  it("supports suffix ranges", async () => {
+    await fs.writeFile(path.join(tmpDir, "range-suffix.txt"), "abcdefghij");
+
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "GET /range-suffix.txt HTTP/1.1\r\nHost: local\r\nRange: bytes=-3\r\n\r\n",
+      );
+      expect(res.status).toBe(206);
+      expect(res.body).toBe("hij");
+      expect(res.headers.get("content-range")).toBe("bytes 7-9/10");
+      expect(res.headers.get("content-length")).toBe("3");
+    });
+  });
+
+  it("supports HEAD range requests without a response body", async () => {
+    await fs.writeFile(path.join(tmpDir, "range-head.txt"), "abcdefghij");
+
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "HEAD /range-head.txt HTTP/1.1\r\nHost: local\r\nRange: bytes=1-3\r\n\r\n",
+      );
+      expect(res.status).toBe(206);
+      expect(res.body).toBe("");
+      expect(res.headers.get("content-range")).toBe("bytes 1-3/10");
+      expect(res.headers.get("content-length")).toBe("3");
+    });
+  });
+
+  it("returns 416 for unsatisfiable ranges", async () => {
+    await fs.writeFile(path.join(tmpDir, "range-416.txt"), "abc");
+
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "GET /range-416.txt HTTP/1.1\r\nHost: local\r\nRange: bytes=100-200\r\n\r\n",
+      );
+      expect(res.status).toBe(416);
+      expect(res.headers.get("content-range")).toBe("bytes */3");
+      expect(res.body).toBe("Range Not Satisfiable");
+    });
+  });
+
   it("keeps HTTP/1.1 connections open across requests", async () => {
     await fs.writeFile(path.join(tmpDir, "keepalive.txt"), "alive");
 

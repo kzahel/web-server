@@ -21,6 +21,11 @@ export interface StaticRequestOptions {
   connectionHeader?: "keep-alive" | "close";
 }
 
+type RangeParseResult =
+  | { kind: "none" }
+  | { kind: "unsatisfiable" }
+  | { kind: "ok"; start: number; end: number };
+
 export class StaticServer {
   private root: string;
   private fs: IFileSystem;
@@ -238,6 +243,7 @@ export class StaticServer {
 
     const mimeType = getMimeType(filePath);
     extraHeaders.set("content-type", mimeType);
+    extraHeaders.set("accept-ranges", "bytes");
     extraHeaders.set("last-modified", mtime.toUTCString());
     extraHeaders.set(
       "etag",
@@ -256,7 +262,53 @@ export class StaticServer {
       return;
     }
 
-    // HEAD: send headers only
+    const range = parseRangeHeader(request.headers.get("range"), fileSize);
+    if (range.kind === "unsatisfiable") {
+      extraHeaders.set("content-range", `bytes */${fileSize}`);
+      this.sendTextResponse(
+        socket,
+        request,
+        416,
+        STATUS_TEXT[416],
+        extraHeaders,
+        STATUS_TEXT[416],
+      );
+      return;
+    }
+
+    if (range.kind === "ok") {
+      const partialSize = range.end - range.start + 1;
+      extraHeaders.set(
+        "content-range",
+        `bytes ${range.start}-${range.end}/${fileSize}`,
+      );
+      extraHeaders.set("content-length", String(partialSize));
+
+      // HEAD: send headers only
+      if (request.method === "HEAD") {
+        sendResponse(socket, {
+          status: 206,
+          statusText: STATUS_TEXT[206],
+          headers: extraHeaders,
+        });
+        return;
+      }
+
+      const handle = await this.fs.open(filePath, "r");
+      try {
+        await sendFileResponse(
+          socket,
+          { status: 206, statusText: STATUS_TEXT[206], headers: extraHeaders },
+          handle,
+          fileSize,
+          { start: range.start, end: range.end },
+        );
+      } finally {
+        await handle.close();
+      }
+      return;
+    }
+
     if (request.method === "HEAD") {
       extraHeaders.set("content-length", String(fileSize));
       sendResponse(socket, {
@@ -406,4 +458,67 @@ function isPathWithinRoot(path: string, root: string): boolean {
     normalizedPath === normalizedRoot ||
     normalizedPath.startsWith(`${normalizedRoot}/`)
   );
+}
+
+function parseRangeHeader(
+  rangeHeader: string | undefined,
+  fileSize: number,
+): RangeParseResult {
+  if (!rangeHeader) {
+    return { kind: "none" };
+  }
+
+  const trimmed = rangeHeader.trim();
+  if (!trimmed.toLowerCase().startsWith("bytes=")) {
+    return { kind: "none" };
+  }
+
+  const rangeValue = trimmed.slice("bytes=".length).trim();
+  if (rangeValue === "" || rangeValue.includes(",")) {
+    return { kind: "none" };
+  }
+
+  const dash = rangeValue.indexOf("-");
+  if (dash === -1) {
+    return { kind: "none" };
+  }
+
+  const startRaw = rangeValue.slice(0, dash).trim();
+  const endRaw = rangeValue.slice(dash + 1).trim();
+
+  if (startRaw === "" && endRaw === "") {
+    return { kind: "none" };
+  }
+
+  if (startRaw === "") {
+    const suffixLength = Number.parseInt(endRaw, 10);
+    if (Number.isNaN(suffixLength) || suffixLength <= 0 || fileSize === 0) {
+      return { kind: "unsatisfiable" };
+    }
+
+    const start = Math.max(fileSize - suffixLength, 0);
+    return { kind: "ok", start, end: fileSize - 1 };
+  }
+
+  const start = Number.parseInt(startRaw, 10);
+  if (Number.isNaN(start) || start < 0) {
+    return { kind: "none" };
+  }
+  if (start >= fileSize) {
+    return { kind: "unsatisfiable" };
+  }
+
+  if (endRaw === "") {
+    return { kind: "ok", start, end: fileSize - 1 };
+  }
+
+  const end = Number.parseInt(endRaw, 10);
+  if (Number.isNaN(end) || end < 0) {
+    return { kind: "none" };
+  }
+  if (start > end) {
+    return { kind: "unsatisfiable" };
+  }
+
+  return { kind: "ok", start, end: Math.min(end, fileSize - 1) };
 }

@@ -3,6 +3,11 @@ import type { ITcpSocket } from "../interfaces/socket.js";
 import { concat, fromString } from "../utils/buffer.js";
 import type { HttpResponseOptions } from "./types.js";
 
+interface SendFileResponseOptions {
+  start?: number;
+  end?: number;
+}
+
 /**
  * Send a complete HTTP response (headers + body) over a socket.
  */
@@ -36,11 +41,15 @@ export async function sendFileResponse(
   response: HttpResponseOptions,
   fileHandle: IFileHandle,
   fileSize: number,
+  options?: SendFileResponseOptions,
 ): Promise<void> {
   const headers = normalizeHeaders(response.headers);
+  const start = options?.start ?? 0;
+  const end = options?.end ?? fileSize - 1;
+  const bytesToSend = Math.max(0, end - start + 1);
 
   if (!headers.has("content-length")) {
-    headers.set("content-length", String(fileSize));
+    headers.set("content-length", String(bytesToSend));
   }
   if (!headers.has("connection")) {
     headers.set("connection", "close");
@@ -55,8 +64,8 @@ export async function sendFileResponse(
 
   const CHUNK_SIZE = 64 * 1024; // 64KB chunks
   const buffer = new Uint8Array(CHUNK_SIZE);
-  let position = 0;
-  let remaining = fileSize;
+  let position = start;
+  let remaining = bytesToSend;
 
   while (remaining > 0) {
     const toRead = Math.min(CHUNK_SIZE, remaining);
