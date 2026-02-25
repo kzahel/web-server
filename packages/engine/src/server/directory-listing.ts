@@ -36,12 +36,12 @@ export async function generateDirectoryListing(
   const parentLink =
     urlPath === "/"
       ? ""
-      : `<tr><td><a href="${encodeURI(urlPath.replace(/\/[^/]*\/?$/, "/") || "/")}">../</a></td><td></td><td></td></tr>\n`;
+      : `<tr><td><a href="${encodePathForHref(urlPath.replace(/\/[^/]*\/?$/, "/") || "/")}">../</a></td><td></td><td></td></tr>\n`;
 
   const rows = entries
     .map((entry) => {
       const name = entry.stat.isDirectory ? `${entry.name}/` : entry.name;
-      const href = encodeURI(
+      const href = encodePathForHref(
         (urlPath.endsWith("/") ? urlPath : `${urlPath}/`) +
           entry.name +
           (entry.stat.isDirectory ? "/" : ""),
@@ -98,4 +98,25 @@ function escapeHtml(str: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function encodePathForHref(path: string): string {
+  const hasLeadingSlash = path.startsWith("/");
+  const hasTrailingSlash = path.endsWith("/") && path !== "/";
+  const segments = path
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map((segment) => encodeURIComponent(segment));
+
+  const joined = segments.join("/");
+  const withLeading = hasLeadingSlash ? `/${joined}` : joined;
+  if (withLeading === "") {
+    return "/";
+  }
+
+  if (hasTrailingSlash) {
+    return `${withLeading}/`;
+  }
+
+  return withLeading;
 }

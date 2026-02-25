@@ -216,6 +216,31 @@ describe("WebServer integration (in-memory)", () => {
     });
   });
 
+  it("serves UTF-8 filenames via percent-encoded request paths", async () => {
+    const fileName = "café-你好.txt";
+    const filePath = path.join(tmpDir, fileName);
+    await fs.writeFile(filePath, "utf8 content");
+
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const encoded = encodeURIComponent(fileName);
+      const res = await request(
+        `GET /${encoded} HTTP/1.1\r\nHost: local\r\n\r\n`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("utf8 content");
+    });
+  });
+
+  it("returns 400 for malformed percent-encoding in request path", async () => {
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "GET /bad%ZZname.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
+      expect(res.status).toBe(400);
+      expect(res.body).toBe("Bad Request");
+    });
+  });
+
   it("returns 404 to HEAD without a response body", async () => {
     await withServer(tmpDir, {}, async ({ request }) => {
       const res = await request(
@@ -320,6 +345,32 @@ describe("WebServer integration (in-memory)", () => {
     await withServer(tmpDir, {}, async ({ request }) => {
       const res = await request("POST / HTTP/1.1\r\nHost: local\r\n\r\n");
       expect(res.status).toBe(405);
+    });
+  });
+
+  it("directory listing escapes and encodes special filenames in links", async () => {
+    try {
+      await fs.unlink(path.join(tmpDir, "index.html"));
+    } catch {}
+
+    const names = [
+      "space name.txt",
+      "100% real.txt",
+      "hash#q?.txt",
+      "café.txt",
+    ];
+    for (const name of names) {
+      await fs.writeFile(path.join(tmpDir, name), name);
+    }
+
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request("GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(200);
+      expect(res.body).toContain('href="/space%20name.txt"');
+      expect(res.body).toContain('href="/100%25%20real.txt"');
+      expect(res.body).toContain('href="/hash%23q%3F.txt"');
+      expect(res.body).toContain('href="/caf%C3%A9.txt"');
+      expect(res.body).toContain(">hash#q?.txt<");
     });
   });
 
@@ -557,6 +608,46 @@ describe("WebServer uploads (in-memory fs)", () => {
       expect(responses[0].headers.get("connection")).toBe("keep-alive");
       expect(responses[1].status).toBe(200);
       expect(responses[1].body).toBe("hello");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("handles UTF-8 and encoded upload paths", async () => {
+    const socketFactory = new InMemorySocketFactory();
+    const fileSystem = new InMemoryFileSystem();
+    await fileSystem.mkdir("/srv");
+
+    const server = new WebServer({
+      socketFactory,
+      fileSystem,
+      config: {
+        ...defaultConfig("/srv"),
+        quiet: true,
+        port: 0,
+        upload: true,
+      },
+    });
+
+    await server.start();
+    try {
+      const encodedPath = "/%E2%9C%93%20caf%C3%A9.txt";
+      const raw = await socketFactory.request(
+        [
+          `PUT ${encodedPath} HTTP/1.1`,
+          "Host: local",
+          "Content-Length: 6",
+          "Connection: close",
+          "",
+          "hello!",
+        ].join("\r\n"),
+      );
+
+      const response = parseResponse(raw);
+      expect(response.status).toBe(201);
+
+      const file = await fileSystem.readFile("/srv/✓ café.txt");
+      expect(decodeToString(file)).toBe("hello!");
     } finally {
       await server.stop();
     }
