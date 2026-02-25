@@ -60,7 +60,7 @@ export interface ITcpServer {
   address(): { port: number } | null;
 
   /** Register a callback for incoming connections. */
-  on(event: "connection", cb: (socket: any) => void): void;
+  on(event: "connection", cb: (socket: unknown) => void): void;
 
   /** Register a callback for server errors. */
   on(event: "error", cb: (err: Error) => void): void;
@@ -82,5 +82,5 @@ export interface ISocketFactory {
   createTcpServer(): ITcpServer;
 
   /** Wrap a native socket into ITcpSocket. */
-  wrapTcpSocket(socket: any): ITcpSocket;
+  wrapTcpSocket(socket: unknown): ITcpSocket;
 }

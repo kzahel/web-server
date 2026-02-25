@@ -1,4 +1,4 @@
-export type Listener = (...args: any[]) => void;
+export type Listener = (...args: unknown[]) => void;
 
 export class EventEmitter {
   private events: Map<string, Listener[]> = new Map();
@@ -23,14 +23,14 @@ export class EventEmitter {
   }
 
   public once(event: string, listener: Listener): this {
-    const onceWrapper = (...args: any[]) => {
+    const onceWrapper = (...args: unknown[]) => {
       this.off(event, onceWrapper);
       listener.apply(this, args);
     };
     return this.on(event, onceWrapper);
   }
 
-  public emit(event: string, ...args: any[]): boolean {
+  public emit(event: string, ...args: unknown[]): boolean {
     if (!this.events.has(event)) return false;
     const listeners = this.events.get(event);
     if (!listeners) return false;

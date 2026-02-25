@@ -84,7 +84,7 @@ class InMemoryTcpSocket implements ITcpSocket {
 class InMemoryTcpServer implements ITcpServer {
   private listening = false;
   private port: number | null = null;
-  private connectionCallbacks: Array<(socket: any) => void> = [];
+  private connectionCallbacks: Array<(socket: unknown) => void> = [];
 
   constructor(private readonly allocatePort: () => number) {}
 
@@ -101,14 +101,14 @@ class InMemoryTcpServer implements ITcpServer {
     return { port: this.port };
   }
 
-  on(event: "connection", cb: (socket: any) => void): void;
+  on(event: "connection", cb: (socket: unknown) => void): void;
   on(event: "error", cb: (err: Error) => void): void;
   on(
     event: "connection" | "error",
-    cb: ((socket: any) => void) | ((err: Error) => void),
+    cb: ((socket: unknown) => void) | ((err: Error) => void),
   ): void {
     if (event === "connection") {
-      this.connectionCallbacks.push(cb as (socket: any) => void);
+      this.connectionCallbacks.push(cb as (socket: unknown) => void);
       return;
     }
     // No-op by default; tests can add explicit fault injection if needed.
@@ -153,7 +153,7 @@ export class InMemorySocketFactory implements ISocketFactory {
     return server;
   }
 
-  wrapTcpSocket(socket: any): ITcpSocket {
+  wrapTcpSocket(socket: unknown): ITcpSocket {
     if (!(socket instanceof InMemoryTcpSocket)) {
       throw new Error("Expected an InMemoryTcpSocket instance");
     }

@@ -190,10 +190,17 @@ export class NodeTcpServer implements ITcpServer {
     return null;
   }
 
-  on(event: "connection", cb: (socket: any) => void): void;
+  on(event: "connection", cb: (socket: unknown) => void): void;
   on(event: "error", cb: (err: Error) => void): void;
-  on(event: "connection" | "error", cb: ((socket: any) => void) | ((err: Error) => void)): void {
-    this.server.on(event, cb as (...args: any[]) => void);
+  on(
+    event: "connection" | "error",
+    cb: ((socket: unknown) => void) | ((err: Error) => void),
+  ): void {
+    if (event === "connection") {
+      this.server.on("connection", cb as (socket: net.Socket) => void);
+      return;
+    }
+    this.server.on("error", cb as (err: Error) => void);
   }
 
   close(callback?: () => void): void {
@@ -214,7 +221,10 @@ export class NodeSocketFactory implements ISocketFactory {
     return new NodeTcpServer();
   }
 
-  wrapTcpSocket(socket: any): ITcpSocket {
+  wrapTcpSocket(socket: unknown): ITcpSocket {
+    if (!(socket instanceof net.Socket) && !(socket instanceof tls.TLSSocket)) {
+      throw new Error("Expected a Node net.Socket or tls.TLSSocket");
+    }
     return new NodeTcpSocket(socket);
   }
 }

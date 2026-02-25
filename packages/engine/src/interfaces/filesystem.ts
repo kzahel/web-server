@@ -59,6 +59,11 @@ export interface IFileSystem {
   delete(path: string): Promise<void>;
 
   /**
+   * Resolve a path to its canonical absolute form, following symlinks.
+   */
+  realpath(path: string): Promise<string>;
+
+  /**
    * Recursively list all files under a directory with their sizes.
    * Returns paths relative to the given path.
    */

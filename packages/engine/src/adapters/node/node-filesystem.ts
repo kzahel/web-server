@@ -96,6 +96,10 @@ export class NodeFileSystem implements IFileSystem {
     await fs.rm(filePath, { recursive: true, force: true });
   }
 
+  async realpath(filePath: string): Promise<string> {
+    return fs.realpath(filePath);
+  }
+
   async listTree(
     dirPath: string,
   ): Promise<Array<{ path: string; size: number }>> {

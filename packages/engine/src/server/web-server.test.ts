@@ -9,14 +9,33 @@ import type {
   ITcpServer,
   ITcpSocket,
 } from "../interfaces/socket.js";
-import { decodeToString } from "../utils/buffer.js";
 import { InMemorySocketFactory } from "../testing/in-memory-socket-factory.js";
+import { decodeToString } from "../utils/buffer.js";
 import { WebServer } from "./web-server.js";
 
 interface ParsedResponse {
   status: number;
   headers: Map<string, string>;
   body: string;
+}
+
+async function createSymlinkIfSupported(
+  target: string,
+  linkPath: string,
+): Promise<boolean> {
+  try {
+    await fs.symlink(target, linkPath);
+    return true;
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code?: string }).code)
+        : "";
+    if (code === "EPERM" || code === "EACCES" || code === "ENOTSUP") {
+      return false;
+    }
+    throw err;
+  }
 }
 
 function parseResponse(raw: Uint8Array): ParsedResponse {
@@ -50,7 +69,9 @@ function parseResponse(raw: Uint8Array): ParsedResponse {
 async function withServer(
   root: string,
   configOverrides: Partial<ReturnType<typeof defaultConfig>>,
-  testBody: (ctx: { request: (rawHttp: string) => Promise<ParsedResponse> }) => Promise<void>,
+  testBody: (ctx: {
+    request: (rawHttp: string) => Promise<ParsedResponse>;
+  }) => Promise<void>,
 ): Promise<void> {
   const socketFactory = new InMemorySocketFactory();
   const server = new WebServer({
@@ -91,7 +112,9 @@ describe("WebServer integration (in-memory)", () => {
     await fs.writeFile(path.join(tmpDir, "hello.txt"), "Hello, world!");
 
     await withServer(tmpDir, {}, async ({ request }) => {
-      const res = await request("GET /hello.txt HTTP/1.1\r\nHost: local\r\n\r\n");
+      const res = await request(
+        "GET /hello.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
       expect(res.status).toBe(200);
       expect(res.body).toBe("Hello, world!");
       expect(res.headers.get("content-type")).toContain("text/plain");
@@ -155,6 +178,55 @@ describe("WebServer integration (in-memory)", () => {
     });
   });
 
+  it("blocks symlink targets that escape the root", async () => {
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "ok200-outside-"),
+    );
+    const outsideFile = path.join(outsideDir, "secret.txt");
+    const linkPath = path.join(tmpDir, "escape-link.txt");
+    await fs.writeFile(outsideFile, "outside secret");
+    await fs.rm(linkPath, { force: true });
+
+    try {
+      const created = await createSymlinkIfSupported(outsideFile, linkPath);
+      if (!created) return;
+
+      await withServer(tmpDir, {}, async ({ request }) => {
+        const res = await request(
+          "GET /escape-link.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+        );
+        expect(res.status).toBe(403);
+        expect(res.body).toBe("Forbidden");
+      });
+    } finally {
+      await fs.rm(linkPath, { force: true });
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("allows symlinks that resolve inside the root", async () => {
+    const targetPath = path.join(tmpDir, "inside-target.txt");
+    const linkPath = path.join(tmpDir, "inside-link.txt");
+    await fs.writeFile(targetPath, "inside");
+    await fs.rm(linkPath, { force: true });
+
+    try {
+      const created = await createSymlinkIfSupported(targetPath, linkPath);
+      if (!created) return;
+
+      await withServer(tmpDir, {}, async ({ request }) => {
+        const res = await request(
+          "GET /inside-link.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+        );
+        expect(res.status).toBe(200);
+        expect(res.body).toBe("inside");
+      });
+    } finally {
+      await fs.rm(linkPath, { force: true });
+      await fs.rm(targetPath, { force: true });
+    }
+  });
+
   it("handles HEAD request", async () => {
     await fs.writeFile(path.join(tmpDir, "head-test.txt"), "test content");
 
@@ -178,7 +250,9 @@ describe("WebServer integration (in-memory)", () => {
       const res = await request("HEAD / HTTP/1.1\r\nHost: local\r\n\r\n");
       expect(res.status).toBe(200);
       expect(res.body).toBe("");
-      expect(Number.parseInt(res.headers.get("content-length") ?? "0", 10)).toBeGreaterThan(0);
+      expect(
+        Number.parseInt(res.headers.get("content-length") ?? "0", 10),
+      ).toBeGreaterThan(0);
       expect(res.headers.get("content-type")).toContain("text/html");
     });
   });
@@ -194,7 +268,9 @@ describe("WebServer integration (in-memory)", () => {
     await fs.writeFile(path.join(tmpDir, "data.json"), '{"ok":true}');
 
     await withServer(tmpDir, {}, async ({ request }) => {
-      const res = await request("GET /data.json HTTP/1.1\r\nHost: local\r\n\r\n");
+      const res = await request(
+        "GET /data.json HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toContain("application/json");
       expect(res.body).toBe('{"ok":true}');
@@ -203,7 +279,10 @@ describe("WebServer integration (in-memory)", () => {
 
   it("serves subdirectory files", async () => {
     await fs.mkdir(path.join(tmpDir, "sub"), { recursive: true });
-    await fs.writeFile(path.join(tmpDir, "sub", "nested.txt"), "nested content");
+    await fs.writeFile(
+      path.join(tmpDir, "sub", "nested.txt"),
+      "nested content",
+    );
 
     await withServer(tmpDir, {}, async ({ request }) => {
       const res = await request(
@@ -220,7 +299,9 @@ describe("WebServer SPA mode (in-memory)", () => {
     await fs.writeFile(path.join(tmpDir, "index.html"), '<div id="app"></div>');
 
     await withServer(tmpDir, { spa: true }, async ({ request }) => {
-      const res = await request("GET /some/route HTTP/1.1\r\nHost: local\r\n\r\n");
+      const res = await request(
+        "GET /some/route HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
       expect(res.status).toBe(200);
       expect(res.body).toBe('<div id="app"></div>');
     });
@@ -232,14 +313,18 @@ describe("WebServer CORS (in-memory)", () => {
     await fs.writeFile(path.join(tmpDir, "cors.txt"), "test");
 
     await withServer(tmpDir, { cors: true }, async ({ request }) => {
-      const res = await request("GET /cors.txt HTTP/1.1\r\nHost: local\r\n\r\n");
+      const res = await request(
+        "GET /cors.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
       expect(res.headers.get("access-control-allow-origin")).toBe("*");
     });
   });
 
   it("handles OPTIONS preflight", async () => {
     await withServer(tmpDir, { cors: true }, async ({ request }) => {
-      const res = await request("OPTIONS /anything HTTP/1.1\r\nHost: local\r\n\r\n");
+      const res = await request(
+        "OPTIONS /anything HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
       expect(res.status).toBe(204);
       expect(res.headers.get("access-control-allow-origin")).toBe("*");
       expect(res.body).toBe("");
@@ -260,9 +345,12 @@ class FailingTcpServer implements ITcpServer {
     return null;
   }
 
-  on(event: "connection", cb: (socket: any) => void): void;
+  on(event: "connection", cb: (socket: unknown) => void): void;
   on(event: "error", cb: (err: Error) => void): void;
-  on(event: "connection" | "error", cb: ((socket: any) => void) | ((err: Error) => void)): void {
+  on(
+    event: "connection" | "error",
+    cb: ((socket: unknown) => void) | ((err: Error) => void),
+  ): void {
     if (event === "error") {
       this.errorCb = cb as (err: Error) => void;
     }
@@ -282,7 +370,7 @@ class FailingSocketFactory implements ISocketFactory {
     return new FailingTcpServer();
   }
 
-  wrapTcpSocket(_socket: any): ITcpSocket {
+  wrapTcpSocket(_socket: unknown): ITcpSocket {
     throw new Error("not used");
   }
 }
@@ -298,11 +386,11 @@ class DelayedCloseTcpServer implements ITcpServer {
     return { port: 43210 };
   }
 
-  on(_event: "connection", _cb: (socket: any) => void): void;
+  on(_event: "connection", _cb: (socket: unknown) => void): void;
   on(_event: "error", _cb: (err: Error) => void): void;
   on(
     _event: "connection" | "error",
-    _cb: ((socket: any) => void) | ((err: Error) => void),
+    _cb: ((socket: unknown) => void) | ((err: Error) => void),
   ): void {
     // No-op for this lifecycle test server.
   }
@@ -328,7 +416,7 @@ class DelayedCloseSocketFactory implements ISocketFactory {
     });
   }
 
-  wrapTcpSocket(_socket: any): ITcpSocket {
+  wrapTcpSocket(_socket: unknown): ITcpSocket {
     throw new Error("not used");
   }
 }

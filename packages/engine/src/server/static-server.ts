@@ -24,9 +24,10 @@ export class StaticServer {
   private spa: boolean;
   private cors: boolean;
   private logger?: Logger;
+  private resolvedRootPromise: Promise<string> | null = null;
 
   constructor(options: StaticServerOptions) {
-    this.root = options.root.replace(/\/+$/, "");
+    this.root = normalizeConfiguredRoot(options.root);
     this.fs = options.fs;
     this.directoryListing = options.directoryListing;
     this.spa = options.spa;
@@ -81,25 +82,25 @@ export class StaticServer {
       return;
     }
 
-    const fsPath = this.root + urlPath;
-
-    // Prevent directory traversal
-    if (!fsPath.startsWith(`${this.root}/`) && fsPath !== this.root) {
-      this.sendTextResponse(
-        socket,
-        request,
-        403,
-        STATUS_TEXT[403],
-        extraHeaders,
-        "Forbidden",
-      );
-      return;
-    }
+    const fsPath = joinRootAndUrlPath(this.root, urlPath);
 
     try {
       const exists = await this.fs.exists(fsPath);
       if (!exists) {
         return this.handleNotFound(socket, request, urlPath, extraHeaders);
+      }
+
+      const allowed = await this.isPathInsideRoot(fsPath);
+      if (!allowed) {
+        this.sendTextResponse(
+          socket,
+          request,
+          403,
+          STATUS_TEXT[403],
+          extraHeaders,
+          "Forbidden",
+        );
+        return;
       }
 
       const stat = await this.fs.stat(fsPath);
@@ -211,6 +212,19 @@ export class StaticServer {
     mtime: Date,
     extraHeaders: Map<string, string>,
   ): Promise<void> {
+    const allowed = await this.isPathInsideRoot(filePath);
+    if (!allowed) {
+      this.sendTextResponse(
+        socket,
+        request,
+        403,
+        STATUS_TEXT[403],
+        extraHeaders,
+        "Forbidden",
+      );
+      return;
+    }
+
     const mimeType = getMimeType(filePath);
     extraHeaders.set("content-type", mimeType);
     extraHeaders.set("last-modified", mtime.toUTCString());
@@ -293,6 +307,25 @@ export class StaticServer {
 
     sendResponse(socket, { status, statusText, headers, body });
   }
+
+  private async isPathInsideRoot(pathToCheck: string): Promise<boolean> {
+    try {
+      const [resolvedPath, resolvedRoot] = await Promise.all([
+        this.fs.realpath(pathToCheck),
+        this.getResolvedRoot(),
+      ]);
+      return isPathWithinRoot(resolvedPath, resolvedRoot);
+    } catch {
+      return false;
+    }
+  }
+
+  private getResolvedRoot(): Promise<string> {
+    if (!this.resolvedRootPromise) {
+      this.resolvedRootPromise = this.fs.realpath(this.root);
+    }
+    return this.resolvedRootPromise;
+  }
 }
 
 /**
@@ -323,4 +356,43 @@ function decodeRequestPath(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeConfiguredRoot(root: string): string {
+  const slashNormalized = root.replace(/\\/g, "/");
+  if (/^[A-Za-z]:\/?$/.test(slashNormalized)) {
+    return slashNormalized.endsWith("/")
+      ? slashNormalized
+      : `${slashNormalized}/`;
+  }
+  const trimmed = slashNormalized.replace(/\/+$/, "");
+  return trimmed === "" ? "/" : trimmed;
+}
+
+function joinRootAndUrlPath(root: string, urlPath: string): string {
+  const suffix = urlPath.replace(/^\/+/, "");
+  if (root === "/") {
+    return `/${suffix}`;
+  }
+  if (root.endsWith("/")) {
+    return `${root}${suffix}`;
+  }
+  return `${root}/${suffix}`;
+}
+
+function normalizePathForComparison(path: string): string {
+  const slashNormalized = path.replace(/\\/g, "/");
+  if (slashNormalized === "/") {
+    return "/";
+  }
+  return slashNormalized.replace(/\/+$/, "");
+}
+
+function isPathWithinRoot(path: string, root: string): boolean {
+  const normalizedPath = normalizePathForComparison(path);
+  const normalizedRoot = normalizePathForComparison(root);
+  return (
+    normalizedPath === normalizedRoot ||
+    normalizedPath.startsWith(`${normalizedRoot}/`)
+  );
 }

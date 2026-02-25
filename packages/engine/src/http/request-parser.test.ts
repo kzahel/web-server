@@ -139,8 +139,8 @@ describe("parseHttpRequest", () => {
       close() {},
     };
 
-    await expect(
-      parseHttpRequest(socket, { timeoutMs: 20 }),
-    ).rejects.toThrow("Request timed out before completion");
+    await expect(parseHttpRequest(socket, { timeoutMs: 20 })).rejects.toThrow(
+      "Request timed out before completion",
+    );
   });
 });
