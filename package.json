@@ -1,7 +1,10 @@
 {
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "desktop/tauri-app",
+    "apps/*",
+    "extension"
   ],
   "scripts": {
     "build": "pnpm -r build",
@@ -9,7 +12,11 @@
     "typecheck": "pnpm --filter @ok200/engine build && pnpm -r typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "check": "biome check --write ."
+    "check": "biome check --write .",
+    "desktop:dev": "pnpm --filter @ok200/desktop tauri dev",
+    "desktop:build": "pnpm --filter @ok200/desktop tauri build",
+    "ext:dev": "pnpm --filter @ok200/extension dev",
+    "ext:build": "pnpm --filter @ok200/extension build"
   },
   "packageManager": "pnpm@9.1.0",
   "devDependencies": {
