@@ -46,6 +46,7 @@ export { StaticServer } from "./server/static-server.js";
 export type { WebServerOptions } from "./server/web-server.js";
 // Server
 export { WebServer } from "./server/web-server.js";
+export { InMemoryFileSystem } from "./testing/in-memory-filesystem.js";
 export { concat, decodeToString, fromString } from "./utils/buffer.js";
 // Utils
 export { EventEmitter } from "./utils/event-emitter.js";
