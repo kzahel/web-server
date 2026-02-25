@@ -1,0 +1,76 @@
+/**
+ * Abstract Socket Interfaces
+ *
+ * Extracted from jstorrent. These interfaces decouple the server engine
+ * from any specific runtime (Node, Bun, QuickJS, JSC).
+ */
+
+export interface ITcpSocket {
+  /** Send data to the remote peer. */
+  send(data: Uint8Array): void
+
+  /** Register a callback for incoming data. */
+  onData(cb: (data: Uint8Array) => void): void
+
+  /** Register a callback for connection close. */
+  onClose(cb: (hadError: boolean) => void): void
+
+  /** Register a callback for errors. */
+  onError(cb: (err: Error) => void): void
+
+  /** Close the connection. */
+  close(): void
+
+  /** Remote peer address. */
+  remoteAddress?: string
+
+  /** Remote peer port. */
+  remotePort?: number
+
+  /** Whether this socket is using TLS. */
+  isSecure?: boolean
+
+  /**
+   * Upgrade this socket to TLS.
+   * @param hostname - Server hostname for SNI
+   * @param options - TLS options
+   */
+  secure?(hostname: string, options?: { skipValidation?: boolean }): Promise<void>
+
+  /**
+   * Connect to a remote peer.
+   */
+  connect?(port: number, host: string): Promise<void>
+}
+
+export interface ITcpServer {
+  /** Start listening on the specified port and optional host. */
+  listen(port: number, host?: string, callback?: () => void): void
+
+  /** Get the address the server is listening on. */
+  address(): { port: number } | null
+
+  /** Register a callback for incoming connections. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: 'connection', cb: (socket: any) => void): void
+
+  /** Close the server. */
+  close(): void
+}
+
+export interface TcpSocketOptions {
+  host?: string
+  port?: number
+}
+
+export interface ISocketFactory {
+  /** Create a new TCP socket. */
+  createTcpSocket(options?: TcpSocketOptions): Promise<ITcpSocket>
+
+  /** Create a TCP server. */
+  createTcpServer(): ITcpServer
+
+  /** Wrap a native socket into ITcpSocket. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  wrapTcpSocket(socket: any): ITcpSocket
+}

@@ -1,0 +1,21 @@
+{
+  "name": "ok200",
+  "version": "0.0.1",
+  "description": "Serve static files from the command line",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ok200": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ok200/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.0.0"
+  }
+}
