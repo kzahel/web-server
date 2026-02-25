@@ -190,6 +190,55 @@ jobs:
             ${{ matrix.args }}
             ${{ matrix.platform == 'windows-latest' && secrets.AZURE_CLIENT_SECRET != '' && '--config ''{"bundle":{"windows":{"signCommand":"trusted-signing-cli -e https://eus.codesigning.azure.net -a kylegraehl -c ok200-profile %1"}}}''' || '' }}
 
+      # --- Build macOS .pkg installer ---
+      - name: Build macOS .pkg installer
+        if: matrix.platform == 'macos-latest' && startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        env:
+          INSTALLER_IDENTITY: ${{ env.HAS_MACOS_SIGNING == 'true' && 'Developer ID Installer: Kyle Graehl (VD7BYQ6ABM)' || '' }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          TARGET="${{ matrix.rust_target }}"
+          if [ "$TARGET" = "aarch64-apple-darwin" ]; then
+            ARCH="aarch64"
+          else
+            ARCH="x64"
+          fi
+          # Find the .app bundle from Tauri build output
+          APP_PATH=$(find desktop/tauri-app/src-tauri/target/"$TARGET"/release/bundle/macos -name "200 OK.app" -maxdepth 1 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Warning: Could not find 200 OK.app, skipping .pkg build"
+            exit 0
+          fi
+          bash desktop/tauri-app/scripts/build-macos-pkg.sh "$APP_PATH" "$VERSION" "$ARCH"
+          echo "PKG_FILE=200_OK_${VERSION}_${ARCH}.pkg" >> "$GITHUB_ENV"
+
+      - name: Upload .pkg to release
+        if: matrix.platform == 'macos-latest' && startsWith(github.ref, 'refs/tags/desktop-v') && env.PKG_FILE != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release upload "$TAG" "$PKG_FILE" --clobber
+
+      # --- Notarize .pkg ---
+      - name: Notarize .pkg
+        if: matrix.platform == 'macos-latest' && startsWith(github.ref, 'refs/tags/desktop-v') && env.HAS_MACOS_NOTARIZATION == 'true' && env.PKG_FILE != ''
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          xcrun notarytool submit "$PKG_FILE" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$ASC_API_KEY_ID" \
+            --issuer "$ASC_API_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$PKG_FILE"
+          # Re-upload stapled .pkg
+          TAG="${GITHUB_REF_NAME}"
+          gh release upload "$TAG" "$PKG_FILE" --clobber
+
       # --- Diagnose flaky DMG bundling ---
       - name: Check for flaky DMG bundling failure
         if: failure() && matrix.platform == 'macos-latest'
@@ -242,8 +291,8 @@ jobs:
             echo ""
             echo "| Platform | |"
             echo "|----------|-|"
-            echo "| macOS (Apple Silicon) | [.dmg](${BASE}/200+OK_${VERSION}_aarch64.dmg) |"
-            echo "| macOS (Intel) | [.dmg](${BASE}/200+OK_${VERSION}_x64.dmg) |"
+            echo "| macOS (Apple Silicon) | [.dmg](${BASE}/200+OK_${VERSION}_aarch64.dmg) · [.pkg](${BASE}/200_OK_${VERSION}_aarch64.pkg) |"
+            echo "| macOS (Intel) | [.dmg](${BASE}/200+OK_${VERSION}_x64.dmg) · [.pkg](${BASE}/200_OK_${VERSION}_x64.pkg) |"
             echo "| Windows | [.exe](${BASE}/200+OK_${VERSION}_x64-setup.exe) · [.msi](${BASE}/200+OK_${VERSION}_x64_en-US.msi) |"
             echo "| Linux | [.deb](${BASE}/200-ok_${VERSION}_amd64.deb) · [.AppImage](${BASE}/200-ok_${VERSION}_amd64.AppImage) · [.rpm](${BASE}/200-ok-${VERSION}-1.x86_64.rpm) |"
           } > /tmp/release-body.md
