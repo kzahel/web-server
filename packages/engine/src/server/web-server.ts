@@ -1,6 +1,10 @@
 import type { ServerConfig } from "../config/server-config.js";
-import { parseHttpRequest } from "../http/request-parser.js";
+import {
+  createHttpRequestParser,
+  HttpRequestParseError,
+} from "../http/request-parser.js";
 import { sendResponse } from "../http/response-writer.js";
+import type { HttpRequest } from "../http/types.js";
 import { STATUS_TEXT } from "../http/types.js";
 import type { IFileSystem } from "../interfaces/filesystem.js";
 import type {
@@ -121,30 +125,55 @@ export class WebServer extends EventEmitter {
       this.activeConnections.delete(socket);
     });
 
+    const parser = createHttpRequestParser(socket);
+
     try {
-      const request = await parseHttpRequest(socket, {
-        timeoutMs: this.config.requestTimeoutMs,
-      });
+      while (true) {
+        let request: HttpRequest;
+        try {
+          request = await parser.readRequest({
+            timeoutMs: this.config.requestTimeoutMs,
+          });
+        } catch (err) {
+          if (
+            err instanceof HttpRequestParseError &&
+            (err.code === "IDLE_TIMEOUT" ||
+              err.code === "CONNECTION_CLOSED" ||
+              err.code === "CONNECTION_CLOSED_INCOMPLETE")
+          ) {
+            break;
+          }
 
-      if (!this.config.quiet) {
-        const addr = socket.remoteAddress ?? "?";
-        this.logger.info(`${request.method} ${request.url} - ${addr}`);
-      }
+          // Parsing failed — send 400 if socket is still open.
+          try {
+            sendResponse(socket, {
+              status: 400,
+              statusText: STATUS_TEXT[400],
+              headers: new Map([["connection", "close"]]),
+              body: fromString("Bad Request"),
+            });
+          } catch {
+            // Socket already closed
+          }
+          break;
+        }
 
-      await this.staticServer.handleRequest(socket, request);
-    } catch (_err) {
-      // Parsing failed or connection closed — send 400 if socket is still open
-      try {
-        sendResponse(socket, {
-          status: 400,
-          statusText: STATUS_TEXT[400],
-          body: fromString("Bad Request"),
+        if (!this.config.quiet) {
+          const addr = socket.remoteAddress ?? "?";
+          this.logger.info(`${request.method} ${request.url} - ${addr}`);
+        }
+
+        const keepAlive = shouldKeepAlive(request.httpVersion, request.headers);
+        await this.staticServer.handleRequest(socket, request, {
+          connectionHeader: keepAlive ? "keep-alive" : "close",
         });
-      } catch {
-        // Socket already closed
+
+        if (!keepAlive) {
+          break;
+        }
       }
     } finally {
-      // Close connection after response (HTTP/1.0 style for MVP)
+      // Close the socket when request loop exits.
       try {
         socket.close();
       } catch {
@@ -152,4 +181,15 @@ export class WebServer extends EventEmitter {
       }
     }
   }
+}
+
+function shouldKeepAlive(
+  httpVersion: string,
+  headers: Map<string, string>,
+): boolean {
+  const connection = headers.get("connection")?.toLowerCase();
+  if (httpVersion === "1.0") {
+    return connection === "keep-alive";
+  }
+  return connection !== "close";
 }

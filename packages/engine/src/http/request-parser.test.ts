@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ITcpSocket } from "../interfaces/socket.js";
 import { fromString } from "../utils/buffer.js";
-import { parseHttpRequest } from "./request-parser.js";
+import { createHttpRequestParser, parseHttpRequest } from "./request-parser.js";
 
 /** Create a mock socket that delivers data and then closes */
 function mockSocket(rawRequest: string): ITcpSocket {
@@ -130,6 +130,21 @@ describe("parseHttpRequest", () => {
     expect(req.url).toBe("/");
   });
 
+  it("parses multiple requests from one persistent socket", async () => {
+    const socket = chunkedMockSocket([
+      "GET /one HTTP/1.1\r\nHost: localhost\r\n\r\nGET /two HTTP/1.1\r\nHost: localhost\r\n\r\n",
+    ]);
+    const parser = createHttpRequestParser(socket);
+
+    const first = await parser.readRequest();
+    const second = await parser.readRequest();
+
+    expect(first.method).toBe("GET");
+    expect(first.url).toBe("/one");
+    expect(second.method).toBe("GET");
+    expect(second.url).toBe("/two");
+  });
+
   it("times out incomplete requests", async () => {
     const socket: ITcpSocket = {
       send() {},
@@ -139,8 +154,10 @@ describe("parseHttpRequest", () => {
       close() {},
     };
 
-    await expect(parseHttpRequest(socket, { timeoutMs: 20 })).rejects.toThrow(
-      "Request timed out before completion",
-    );
+    await expect(
+      parseHttpRequest(socket, { timeoutMs: 20 }),
+    ).rejects.toMatchObject({
+      code: "IDLE_TIMEOUT",
+    });
   });
 });

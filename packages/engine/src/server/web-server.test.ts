@@ -66,6 +66,62 @@ function parseResponse(raw: Uint8Array): ParsedResponse {
   return { status, headers, body: bodyPart };
 }
 
+function parseResponses(raw: Uint8Array): ParsedResponse[] {
+  const text = decodeToString(raw);
+  const responses: ParsedResponse[] = [];
+  let offset = 0;
+
+  while (offset < text.length) {
+    const splitAt = text.indexOf("\r\n\r\n", offset);
+    if (splitAt === -1) {
+      throw new Error("Invalid HTTP response stream: missing header separator");
+    }
+
+    const headerPart = text.slice(offset, splitAt);
+    const lines = headerPart.split("\r\n");
+    const statusLine = lines[0];
+    const status = Number.parseInt(statusLine.split(" ")[1] ?? "", 10);
+    if (Number.isNaN(status)) {
+      throw new Error(`Invalid status line: ${statusLine}`);
+    }
+
+    const headers = new Map<string, string>();
+    for (let i = 1; i < lines.length; i++) {
+      const colon = lines[i].indexOf(":");
+      if (colon === -1) continue;
+      const key = lines[i].slice(0, colon).trim().toLowerCase();
+      const value = lines[i].slice(colon + 1).trim();
+      headers.set(key, value);
+    }
+
+    const contentLength = Number.parseInt(
+      headers.get("content-length") ?? "0",
+      10,
+    );
+    const bodyStart = splitAt + 4;
+    const bodyEnd =
+      bodyStart + (Number.isNaN(contentLength) ? 0 : contentLength);
+    const body = text.slice(bodyStart, bodyEnd);
+    responses.push({ status, headers, body });
+    offset = bodyEnd;
+  }
+
+  return responses;
+}
+
+function withConnectionClose(rawHttp: string): string {
+  const separator = "\r\n\r\n";
+  const headerEnd = rawHttp.indexOf(separator);
+  if (headerEnd === -1) {
+    return rawHttp;
+  }
+  const headerPart = rawHttp.slice(0, headerEnd);
+  if (/\r\nconnection\s*:/i.test(headerPart)) {
+    return rawHttp;
+  }
+  return `${headerPart}\r\nConnection: close${rawHttp.slice(headerEnd)}`;
+}
+
 async function withServer(
   root: string,
   configOverrides: Partial<ReturnType<typeof defaultConfig>>,
@@ -90,7 +146,9 @@ async function withServer(
   try {
     await testBody({
       request: async (rawHttp: string) =>
-        parseResponse(await socketFactory.request(rawHttp)),
+        parseResponse(
+          await socketFactory.request(withConnectionClose(rawHttp)),
+        ),
     });
   } finally {
     await server.stop();
@@ -291,6 +349,49 @@ describe("WebServer integration (in-memory)", () => {
       expect(res.status).toBe(200);
       expect(res.body).toBe("nested content");
     });
+  });
+
+  it("keeps HTTP/1.1 connections open across requests", async () => {
+    await fs.writeFile(path.join(tmpDir, "keepalive.txt"), "alive");
+
+    const socketFactory = new InMemorySocketFactory();
+    const server = new WebServer({
+      socketFactory,
+      fileSystem: new NodeFileSystem(),
+      config: {
+        ...defaultConfig(tmpDir),
+        quiet: true,
+        port: 0,
+      },
+    });
+
+    await server.start();
+    try {
+      const raw = await socketFactory.request(
+        [
+          "GET /keepalive.txt HTTP/1.1",
+          "Host: local",
+          "Connection: keep-alive",
+          "",
+          "GET /keepalive.txt HTTP/1.1",
+          "Host: local",
+          "Connection: close",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+
+      const responses = parseResponses(raw);
+      expect(responses).toHaveLength(2);
+      expect(responses[0].status).toBe(200);
+      expect(responses[0].body).toBe("alive");
+      expect(responses[0].headers.get("connection")).toBe("keep-alive");
+      expect(responses[1].status).toBe(200);
+      expect(responses[1].body).toBe("alive");
+      expect(responses[1].headers.get("connection")).toBe("close");
+    } finally {
+      await server.stop();
+    }
   });
 });
 

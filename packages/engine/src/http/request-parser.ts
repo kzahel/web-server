@@ -13,6 +13,31 @@ export interface ParseHttpRequestOptions {
   timeoutMs?: number;
 }
 
+export type HttpRequestParseErrorCode =
+  | "IDLE_TIMEOUT"
+  | "REQUEST_TIMEOUT"
+  | "CONNECTION_CLOSED"
+  | "CONNECTION_CLOSED_INCOMPLETE"
+  | "HEADERS_TOO_LARGE"
+  | "MALFORMED_REQUEST_LINE"
+  | "INVALID_CONTENT_LENGTH"
+  | "BODY_TOO_LARGE";
+
+export class HttpRequestParseError extends Error {
+  constructor(
+    readonly code: HttpRequestParseErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HttpRequestParseError";
+  }
+}
+
+interface ParsedRequestResult {
+  request: HttpRequest;
+  bytesConsumed: number;
+}
+
 function findSequence(buffer: Uint8Array, sequence: Uint8Array): number {
   outer: for (let i = 0; i <= buffer.length - sequence.length; i++) {
     for (let j = 0; j < sequence.length; j++) {
@@ -23,6 +48,197 @@ function findSequence(buffer: Uint8Array, sequence: Uint8Array): number {
   return -1;
 }
 
+function tryParseRequestFromBuffer(
+  buffer: Uint8Array,
+  maxHeaderSize: number,
+  maxBodySize: number,
+): ParsedRequestResult | null {
+  const separatorIndex = findSequence(buffer, CRLF_CRLF);
+  if (separatorIndex === -1) {
+    if (buffer.length > maxHeaderSize) {
+      throw new HttpRequestParseError(
+        "HEADERS_TOO_LARGE",
+        "Request headers too large",
+      );
+    }
+    return null;
+  }
+
+  if (separatorIndex > maxHeaderSize) {
+    throw new HttpRequestParseError(
+      "HEADERS_TOO_LARGE",
+      "Request headers too large",
+    );
+  }
+
+  const headerString = decodeToString(buffer.subarray(0, separatorIndex));
+  const lines = headerString.split("\r\n");
+  const requestLine = lines[0] ?? "";
+  const requestLineParts = requestLine.trim().split(/\s+/);
+  if (requestLineParts.length < 3) {
+    throw new HttpRequestParseError(
+      "MALFORMED_REQUEST_LINE",
+      "Malformed request line",
+    );
+  }
+
+  const [method, url, rawVersion] = requestLineParts;
+  const httpVersion = rawVersion.startsWith("HTTP/")
+    ? rawVersion.slice("HTTP/".length)
+    : rawVersion;
+
+  const headers = new Map<string, string>();
+  for (let i = 1; i < lines.length; i++) {
+    const colonIdx = lines[i].indexOf(":");
+    if (colonIdx === -1) continue;
+    const key = lines[i].substring(0, colonIdx).trim().toLowerCase();
+    const value = lines[i].substring(colonIdx + 1).trim();
+    headers.set(key, value);
+  }
+
+  const clHeader = headers.get("content-length");
+  const contentLength = clHeader ? Number.parseInt(clHeader, 10) : 0;
+  if (Number.isNaN(contentLength) || contentLength < 0) {
+    throw new HttpRequestParseError(
+      "INVALID_CONTENT_LENGTH",
+      "Invalid Content-Length",
+    );
+  }
+  if (contentLength > maxBodySize) {
+    throw new HttpRequestParseError("BODY_TOO_LARGE", "Request body too large");
+  }
+
+  const bodyStart = separatorIndex + CRLF_CRLF.length;
+  const bodyEnd = bodyStart + contentLength;
+  if (buffer.length < bodyEnd) {
+    return null;
+  }
+
+  const body = contentLength > 0 ? buffer.slice(bodyStart, bodyEnd) : undefined;
+
+  return {
+    request: { method, url, httpVersion, headers, body },
+    bytesConsumed: bodyEnd,
+  };
+}
+
+export class HttpRequestStreamParser {
+  private buffer: Uint8Array = new Uint8Array(0);
+  private closed = false;
+  private socketError: Error | null = null;
+  private waiters: Array<() => void> = [];
+
+  constructor(socket: ITcpSocket) {
+    socket.onData((data) => {
+      this.buffer = concat([this.buffer, data]);
+      this.notifyWaiters();
+    });
+
+    socket.onClose(() => {
+      this.closed = true;
+      this.notifyWaiters();
+    });
+
+    socket.onError((err) => {
+      this.socketError = err;
+      this.closed = true;
+      this.notifyWaiters();
+    });
+  }
+
+  async readRequest(options?: ParseHttpRequestOptions): Promise<HttpRequest> {
+    const maxHeaderSize = options?.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE;
+    const maxBodySize = options?.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    while (true) {
+      const parsed = tryParseRequestFromBuffer(
+        this.buffer,
+        maxHeaderSize,
+        maxBodySize,
+      );
+
+      if (parsed) {
+        this.buffer = this.buffer.slice(parsed.bytesConsumed);
+        return parsed.request;
+      }
+
+      if (this.socketError) {
+        throw this.socketError;
+      }
+
+      if (this.closed) {
+        if (this.buffer.length === 0) {
+          throw new HttpRequestParseError(
+            "CONNECTION_CLOSED",
+            "Connection closed",
+          );
+        }
+        throw new HttpRequestParseError(
+          "CONNECTION_CLOSED_INCOMPLETE",
+          "Connection closed before request was complete",
+        );
+      }
+
+      const remainingMs = deadline - Date.now();
+      const hadActivity = await this.waitForActivity(remainingMs);
+      if (!hadActivity) {
+        if (this.buffer.length === 0) {
+          throw new HttpRequestParseError(
+            "IDLE_TIMEOUT",
+            "Connection idle timed out",
+          );
+        }
+        throw new HttpRequestParseError(
+          "REQUEST_TIMEOUT",
+          "Request timed out before completion",
+        );
+      }
+    }
+  }
+
+  private waitForActivity(timeoutMs: number): Promise<boolean> {
+    if (timeoutMs <= 0) {
+      return Promise.resolve(false);
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+
+      const onActivity = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(true);
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.waiters = this.waiters.filter((waiter) => waiter !== onActivity);
+        resolve(false);
+      }, timeoutMs);
+
+      this.waiters.push(onActivity);
+    });
+  }
+
+  private notifyWaiters(): void {
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const waiter of waiters) {
+      waiter();
+    }
+  }
+}
+
+export function createHttpRequestParser(
+  socket: ITcpSocket,
+): HttpRequestStreamParser {
+  return new HttpRequestStreamParser(socket);
+}
+
 /**
  * Parse a single HTTP/1.1 request from a TCP socket stream.
  * Returns a promise that resolves with the parsed request.
@@ -31,113 +247,5 @@ export function parseHttpRequest(
   socket: ITcpSocket,
   options?: ParseHttpRequestOptions,
 ): Promise<HttpRequest> {
-  return new Promise((resolve, reject) => {
-    const maxHeaderSize = options?.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE;
-    const maxBodySize = options?.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
-    const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-
-    let buffer: Uint8Array = new Uint8Array(0);
-    let headersParsed = false;
-    let method = "";
-    let url = "";
-    let httpVersion = "";
-    let headers: Map<string, string> = new Map();
-    let contentLength = 0;
-    let bodyStart = 0;
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      fail(new Error("Request timed out before completion"));
-    }, timeoutMs);
-
-    const done = (result: HttpRequest) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        resolve(result);
-      }
-    };
-
-    const fail = (err: Error) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(err);
-      }
-    };
-
-    const processBuffer = () => {
-      if (!headersParsed) {
-        if (buffer.length > maxHeaderSize) {
-          fail(new Error("Request headers too large"));
-          return;
-        }
-
-        const separatorIndex = findSequence(buffer, CRLF_CRLF);
-        if (separatorIndex === -1) return; // Need more data
-
-        const headerString = decodeToString(buffer.subarray(0, separatorIndex));
-        bodyStart = separatorIndex + 4;
-
-        const lines = headerString.split("\r\n");
-        const requestLine = lines[0];
-        const parts = requestLine.split(" ");
-        if (parts.length < 3) {
-          fail(new Error("Malformed request line"));
-          return;
-        }
-
-        method = parts[0];
-        url = parts[1];
-        httpVersion = parts[2].replace("HTTP/", "");
-
-        headers = new Map();
-        for (let i = 1; i < lines.length; i++) {
-          const colonIdx = lines[i].indexOf(":");
-          if (colonIdx === -1) continue;
-          const key = lines[i].substring(0, colonIdx).trim().toLowerCase();
-          const value = lines[i].substring(colonIdx + 1).trim();
-          headers.set(key, value);
-        }
-
-        const clHeader = headers.get("content-length");
-        contentLength = clHeader ? parseInt(clHeader, 10) : 0;
-        if (Number.isNaN(contentLength) || contentLength < 0) {
-          fail(new Error("Invalid Content-Length"));
-          return;
-        }
-        if (contentLength > maxBodySize) {
-          fail(new Error("Request body too large"));
-          return;
-        }
-
-        headersParsed = true;
-      }
-
-      if (headersParsed) {
-        const bodyReceived = buffer.length - bodyStart;
-        if (bodyReceived >= contentLength) {
-          const body =
-            contentLength > 0
-              ? buffer.slice(bodyStart, bodyStart + contentLength)
-              : undefined;
-          done({ method, url, httpVersion, headers, body });
-        }
-      }
-    };
-
-    socket.onData((data) => {
-      buffer = concat([buffer, data]);
-      processBuffer();
-    });
-
-    socket.onClose(() => {
-      if (!resolved) {
-        fail(new Error("Connection closed before request was complete"));
-      }
-    });
-
-    socket.onError((err) => {
-      fail(err);
-    });
-  });
+  return createHttpRequestParser(socket).readRequest(options);
 }

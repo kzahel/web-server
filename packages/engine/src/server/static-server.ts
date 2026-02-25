@@ -17,6 +17,10 @@ export interface StaticServerOptions {
   logger?: Logger;
 }
 
+export interface StaticRequestOptions {
+  connectionHeader?: "keep-alive" | "close";
+}
+
 export class StaticServer {
   private root: string;
   private fs: IFileSystem;
@@ -35,10 +39,17 @@ export class StaticServer {
     this.logger = options.logger;
   }
 
-  async handleRequest(socket: ITcpSocket, request: HttpRequest): Promise<void> {
+  async handleRequest(
+    socket: ITcpSocket,
+    request: HttpRequest,
+    options?: StaticRequestOptions,
+  ): Promise<void> {
     const extraHeaders = new Map<string, string>();
     extraHeaders.set("server", "ok200");
     extraHeaders.set("date", new Date().toUTCString());
+    if (options?.connectionHeader) {
+      extraHeaders.set("connection", options.connectionHeader);
+    }
 
     if (this.cors) {
       extraHeaders.set("access-control-allow-origin", "*");
