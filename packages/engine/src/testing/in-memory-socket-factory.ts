@@ -96,15 +96,23 @@ class InMemoryTcpServer implements ITcpServer {
     return { port: this.port };
   }
 
-  on(event: "connection", cb: (socket: any) => void): void {
+  on(event: "connection", cb: (socket: any) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
+  on(
+    event: "connection" | "error",
+    cb: ((socket: any) => void) | ((err: Error) => void),
+  ): void {
     if (event === "connection") {
-      this.connectionCallbacks.push(cb);
+      this.connectionCallbacks.push(cb as (socket: any) => void);
+      return;
     }
+    // No-op by default; tests can add explicit fault injection if needed.
   }
 
-  close(): void {
+  close(callback?: () => void): void {
     this.listening = false;
     this.port = null;
+    queueMicrotask(() => callback?.());
   }
 
   isListening(): boolean {

@@ -56,24 +56,28 @@ export class StaticServer {
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       extraHeaders.set("allow", "GET, HEAD, OPTIONS");
-      sendResponse(socket, {
-        status: 405,
-        statusText: STATUS_TEXT[405],
-        headers: extraHeaders,
-        body: fromString("Method Not Allowed"),
-      });
+      this.sendTextResponse(
+        socket,
+        request,
+        405,
+        STATUS_TEXT[405],
+        extraHeaders,
+        "Method Not Allowed",
+      );
       return;
     }
 
     // Decode URL and resolve path
     const urlPath = decodeRequestPath(request.url);
     if (!urlPath) {
-      sendResponse(socket, {
-        status: 400,
-        statusText: STATUS_TEXT[400],
-        headers: extraHeaders,
-        body: fromString("Bad Request"),
-      });
+      this.sendTextResponse(
+        socket,
+        request,
+        400,
+        STATUS_TEXT[400],
+        extraHeaders,
+        "Bad Request",
+      );
       return;
     }
 
@@ -81,12 +85,14 @@ export class StaticServer {
 
     // Prevent directory traversal
     if (!fsPath.startsWith(`${this.root}/`) && fsPath !== this.root) {
-      sendResponse(socket, {
-        status: 403,
-        statusText: STATUS_TEXT[403],
-        headers: extraHeaders,
-        body: fromString("Forbidden"),
-      });
+      this.sendTextResponse(
+        socket,
+        request,
+        403,
+        STATUS_TEXT[403],
+        extraHeaders,
+        "Forbidden",
+      );
       return;
     }
 
@@ -118,12 +124,14 @@ export class StaticServer {
           const html = await generateDirectoryListing(this.fs, fsPath, urlPath);
           const body = fromString(html);
           extraHeaders.set("content-type", "text/html; charset=utf-8");
-          sendResponse(socket, {
-            status: 200,
-            statusText: STATUS_TEXT[200],
-            headers: extraHeaders,
+          this.sendResponseWithOptionalBody(
+            socket,
+            request,
+            200,
+            STATUS_TEXT[200],
+            extraHeaders,
             body,
-          });
+          );
           return;
         }
 
@@ -141,20 +149,24 @@ export class StaticServer {
         );
       }
 
-      sendResponse(socket, {
-        status: 404,
-        statusText: STATUS_TEXT[404],
-        headers: extraHeaders,
-        body: fromString("Not Found"),
-      });
+      this.sendTextResponse(
+        socket,
+        request,
+        404,
+        STATUS_TEXT[404],
+        extraHeaders,
+        "Not Found",
+      );
     } catch (err) {
       this.logger?.error("Error serving request:", err);
-      sendResponse(socket, {
-        status: 500,
-        statusText: STATUS_TEXT[500],
-        headers: extraHeaders,
-        body: fromString("Internal Server Error"),
-      });
+      this.sendTextResponse(
+        socket,
+        request,
+        500,
+        STATUS_TEXT[500],
+        extraHeaders,
+        "Internal Server Error",
+      );
     }
   }
 
@@ -181,12 +193,14 @@ export class StaticServer {
     }
 
     extraHeaders.set("content-type", "text/plain; charset=utf-8");
-    sendResponse(socket, {
-      status: 404,
-      statusText: STATUS_TEXT[404],
-      headers: extraHeaders,
-      body: fromString("Not Found"),
-    });
+    this.sendTextResponse(
+      socket,
+      _request,
+      404,
+      STATUS_TEXT[404],
+      extraHeaders,
+      "Not Found",
+    );
   }
 
   private async serveFile(
@@ -240,6 +254,44 @@ export class StaticServer {
     } finally {
       await handle.close();
     }
+  }
+
+  private sendTextResponse(
+    socket: ITcpSocket,
+    request: HttpRequest,
+    status: number,
+    statusText: string,
+    headers: Map<string, string>,
+    text: string,
+  ): void {
+    headers.set("content-type", "text/plain; charset=utf-8");
+    this.sendResponseWithOptionalBody(
+      socket,
+      request,
+      status,
+      statusText,
+      headers,
+      fromString(text),
+    );
+  }
+
+  private sendResponseWithOptionalBody(
+    socket: ITcpSocket,
+    request: HttpRequest,
+    status: number,
+    statusText: string,
+    headers: Map<string, string>,
+    body?: Uint8Array,
+  ): void {
+    if (request.method === "HEAD") {
+      if (body) {
+        headers.set("content-length", String(body.length));
+      }
+      sendResponse(socket, { status, statusText, headers });
+      return;
+    }
+
+    sendResponse(socket, { status, statusText, headers, body });
   }
 }
 

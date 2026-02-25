@@ -13,6 +13,8 @@ export interface ServerConfig {
   directoryListing: boolean;
   /** Suppress request logging. Default: false */
   quiet: boolean;
+  /** Max time allowed for receiving a full HTTP request. Default: 5000ms */
+  requestTimeoutMs: number;
 }
 
 export function defaultConfig(root: string): ServerConfig {
@@ -24,5 +26,6 @@ export function defaultConfig(root: string): ServerConfig {
     spa: false,
     directoryListing: true,
     quiet: false,
+    requestTimeoutMs: 5000,
   };
 }

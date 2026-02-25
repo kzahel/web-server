@@ -142,12 +142,14 @@ export class NodeTcpServer implements ITcpServer {
     return null;
   }
 
-  on(event: "connection", cb: (socket: any) => void): void {
-    this.server.on(event, cb);
+  on(event: "connection", cb: (socket: any) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
+  on(event: "connection" | "error", cb: ((socket: any) => void) | ((err: Error) => void)): void {
+    this.server.on(event, cb as (...args: any[]) => void);
   }
 
-  close(): void {
-    this.server.close();
+  close(callback?: () => void): void {
+    this.server.close(callback);
   }
 }
 

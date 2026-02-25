@@ -56,8 +56,11 @@ export interface ITcpServer {
   /** Register a callback for incoming connections. */
   on(event: "connection", cb: (socket: any) => void): void;
 
+  /** Register a callback for server errors. */
+  on(event: "error", cb: (err: Error) => void): void;
+
   /** Close the server. */
-  close(): void;
+  close(callback?: () => void): void;
 }
 
 export interface TcpSocketOptions {

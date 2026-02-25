@@ -129,4 +129,18 @@ describe("parseHttpRequest", () => {
     expect(req.method).toBe("HEAD");
     expect(req.url).toBe("/");
   });
+
+  it("times out incomplete requests", async () => {
+    const socket: ITcpSocket = {
+      send() {},
+      onData() {},
+      onClose() {},
+      onError() {},
+      close() {},
+    };
+
+    await expect(
+      parseHttpRequest(socket, { timeoutMs: 20 }),
+    ).rejects.toThrow("Request timed out before completion");
+  });
 });

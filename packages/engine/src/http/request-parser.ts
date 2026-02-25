@@ -3,8 +3,15 @@ import { concat, decodeToString } from "../utils/buffer.js";
 import type { HttpRequest } from "./types.js";
 
 const CRLF_CRLF = new Uint8Array([13, 10, 13, 10]); // \r\n\r\n
-const MAX_HEADER_SIZE = 8 * 1024; // 8KB
-const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
+const DEFAULT_MAX_HEADER_SIZE = 8 * 1024; // 8KB
+const DEFAULT_MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
+const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
+
+export interface ParseHttpRequestOptions {
+  maxHeaderSize?: number;
+  maxBodySize?: number;
+  timeoutMs?: number;
+}
 
 function findSequence(buffer: Uint8Array, sequence: Uint8Array): number {
   outer: for (let i = 0; i <= buffer.length - sequence.length; i++) {
@@ -20,8 +27,15 @@ function findSequence(buffer: Uint8Array, sequence: Uint8Array): number {
  * Parse a single HTTP/1.1 request from a TCP socket stream.
  * Returns a promise that resolves with the parsed request.
  */
-export function parseHttpRequest(socket: ITcpSocket): Promise<HttpRequest> {
+export function parseHttpRequest(
+  socket: ITcpSocket,
+  options?: ParseHttpRequestOptions,
+): Promise<HttpRequest> {
   return new Promise((resolve, reject) => {
+    const maxHeaderSize = options?.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE;
+    const maxBodySize = options?.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+
     let buffer: Uint8Array = new Uint8Array(0);
     let headersParsed = false;
     let method = "";
@@ -31,10 +45,14 @@ export function parseHttpRequest(socket: ITcpSocket): Promise<HttpRequest> {
     let contentLength = 0;
     let bodyStart = 0;
     let resolved = false;
+    const timeout = setTimeout(() => {
+      fail(new Error("Request timed out before completion"));
+    }, timeoutMs);
 
     const done = (result: HttpRequest) => {
       if (!resolved) {
         resolved = true;
+        clearTimeout(timeout);
         resolve(result);
       }
     };
@@ -42,13 +60,14 @@ export function parseHttpRequest(socket: ITcpSocket): Promise<HttpRequest> {
     const fail = (err: Error) => {
       if (!resolved) {
         resolved = true;
+        clearTimeout(timeout);
         reject(err);
       }
     };
 
     const processBuffer = () => {
       if (!headersParsed) {
-        if (buffer.length > MAX_HEADER_SIZE) {
+        if (buffer.length > maxHeaderSize) {
           fail(new Error("Request headers too large"));
           return;
         }
@@ -86,7 +105,7 @@ export function parseHttpRequest(socket: ITcpSocket): Promise<HttpRequest> {
           fail(new Error("Invalid Content-Length"));
           return;
         }
-        if (contentLength > MAX_BODY_SIZE) {
+        if (contentLength > maxBodySize) {
           fail(new Error("Request body too large"));
           return;
         }

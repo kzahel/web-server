@@ -4,6 +4,11 @@ import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { NodeFileSystem } from "../adapters/node/node-filesystem.js";
 import { defaultConfig } from "../config/server-config.js";
+import type {
+  ISocketFactory,
+  ITcpServer,
+  ITcpSocket,
+} from "../interfaces/socket.js";
 import { decodeToString } from "../utils/buffer.js";
 import { InMemorySocketFactory } from "../testing/in-memory-socket-factory.js";
 import { WebServer } from "./web-server.js";
@@ -129,6 +134,17 @@ describe("WebServer integration (in-memory)", () => {
     });
   });
 
+  it("returns 404 to HEAD without a response body", async () => {
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request(
+        "HEAD /missing.txt HTTP/1.1\r\nHost: local\r\n\r\n",
+      );
+      expect(res.status).toBe(404);
+      expect(res.body).toBe("");
+      expect(res.headers.get("content-length")).toBe("9");
+    });
+  });
+
   it("blocks path traversal via raw request", async () => {
     await withServer(tmpDir, {}, async ({ request }) => {
       const res = await request(
@@ -149,6 +165,21 @@ describe("WebServer integration (in-memory)", () => {
       expect(res.status).toBe(200);
       expect(res.body).toBe("");
       expect(res.headers.get("content-length")).toBe("12");
+    });
+  });
+
+  it("handles HEAD request for directory listing without body", async () => {
+    try {
+      await fs.unlink(path.join(tmpDir, "index.html"));
+    } catch {}
+    await fs.writeFile(path.join(tmpDir, "listing-only.txt"), "x");
+
+    await withServer(tmpDir, {}, async ({ request }) => {
+      const res = await request("HEAD / HTTP/1.1\r\nHost: local\r\n\r\n");
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("");
+      expect(Number.parseInt(res.headers.get("content-length") ?? "0", 10)).toBeGreaterThan(0);
+      expect(res.headers.get("content-type")).toContain("text/html");
     });
   });
 
@@ -213,5 +244,125 @@ describe("WebServer CORS (in-memory)", () => {
       expect(res.headers.get("access-control-allow-origin")).toBe("*");
       expect(res.body).toBe("");
     });
+  });
+});
+
+class FailingTcpServer implements ITcpServer {
+  private errorCb: ((err: Error) => void) | null = null;
+
+  listen(_port: number, _host?: string, _callback?: () => void): void {
+    queueMicrotask(() => {
+      this.errorCb?.(new Error("bind failed"));
+    });
+  }
+
+  address(): { port: number } | null {
+    return null;
+  }
+
+  on(event: "connection", cb: (socket: any) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
+  on(event: "connection" | "error", cb: ((socket: any) => void) | ((err: Error) => void)): void {
+    if (event === "error") {
+      this.errorCb = cb as (err: Error) => void;
+    }
+  }
+
+  close(callback?: () => void): void {
+    callback?.();
+  }
+}
+
+class FailingSocketFactory implements ISocketFactory {
+  async createTcpSocket(): Promise<ITcpSocket> {
+    throw new Error("not used");
+  }
+
+  createTcpServer(): ITcpServer {
+    return new FailingTcpServer();
+  }
+
+  wrapTcpSocket(_socket: any): ITcpSocket {
+    throw new Error("not used");
+  }
+}
+
+class DelayedCloseTcpServer implements ITcpServer {
+  constructor(private readonly onCloseDone: () => void) {}
+
+  listen(_port: number, _host?: string, callback?: () => void): void {
+    queueMicrotask(() => callback?.());
+  }
+
+  address(): { port: number } | null {
+    return { port: 43210 };
+  }
+
+  on(_event: "connection", _cb: (socket: any) => void): void;
+  on(_event: "error", _cb: (err: Error) => void): void;
+  on(
+    _event: "connection" | "error",
+    _cb: ((socket: any) => void) | ((err: Error) => void),
+  ): void {
+    // No-op for this lifecycle test server.
+  }
+
+  close(callback?: () => void): void {
+    setTimeout(() => {
+      this.onCloseDone();
+      callback?.();
+    }, 20);
+  }
+}
+
+class DelayedCloseSocketFactory implements ISocketFactory {
+  closeFinished = false;
+
+  async createTcpSocket(): Promise<ITcpSocket> {
+    throw new Error("not used");
+  }
+
+  createTcpServer(): ITcpServer {
+    return new DelayedCloseTcpServer(() => {
+      this.closeFinished = true;
+    });
+  }
+
+  wrapTcpSocket(_socket: any): ITcpSocket {
+    throw new Error("not used");
+  }
+}
+
+describe("WebServer lifecycle", () => {
+  it("rejects start() on listen errors", async () => {
+    const server = new WebServer({
+      socketFactory: new FailingSocketFactory(),
+      fileSystem: new NodeFileSystem(),
+      config: {
+        ...defaultConfig(tmpDir),
+        quiet: true,
+      },
+    });
+
+    await expect(server.start()).rejects.toThrow("bind failed");
+  });
+
+  it("waits for close callback before resolving stop()", async () => {
+    const socketFactory = new DelayedCloseSocketFactory();
+    const server = new WebServer({
+      socketFactory,
+      fileSystem: new NodeFileSystem(),
+      config: {
+        ...defaultConfig(tmpDir),
+        quiet: true,
+      },
+    });
+
+    await server.start();
+    const stopping = server.stop();
+    await Promise.resolve();
+    expect(socketFactory.closeFinished).toBe(false);
+    await stopping;
+    expect(socketFactory.closeFinished).toBe(true);
   });
 });

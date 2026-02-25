@@ -48,16 +48,37 @@ export class WebServer extends EventEmitter {
   }
 
   start(): Promise<number> {
-    return new Promise((resolve) => {
-      this.tcpServer = this.socketFactory.createTcpServer();
+    if (this.tcpServer) {
+      return Promise.reject(new Error("Server is already started"));
+    }
 
-      this.tcpServer.on("connection", (rawSocket) => {
+    return new Promise((resolve, reject) => {
+      const server = this.socketFactory.createTcpServer();
+      this.tcpServer = server;
+
+      let settled = false;
+
+      server.on("connection", (rawSocket) => {
         const socket = this.socketFactory.wrapTcpSocket(rawSocket);
         this.handleConnection(socket);
       });
 
-      this.tcpServer.listen(this.config.port, this.config.host, () => {
-        const addr = this.tcpServer?.address();
+      server.on("error", (err) => {
+        if (!settled) {
+          settled = true;
+          this.tcpServer = null;
+          reject(err);
+          return;
+        }
+
+        this.logger.error("TCP server error:", err);
+        this.emit("error", err);
+      });
+
+      server.listen(this.config.port, this.config.host, () => {
+        if (settled) return;
+        settled = true;
+        const addr = server.address();
         const port = addr?.port ?? this.config.port;
         this.emit("listening", port);
         resolve(port);
@@ -67,18 +88,25 @@ export class WebServer extends EventEmitter {
 
   stop(): Promise<void> {
     return new Promise((resolve) => {
+      const server = this.tcpServer;
+      this.tcpServer = null;
+
       // Close all active connections
       for (const socket of this.activeConnections) {
         socket.close();
       }
       this.activeConnections.clear();
 
-      if (this.tcpServer) {
-        this.tcpServer.close();
-        this.tcpServer = null;
+      if (!server) {
+        this.emit("close");
+        resolve();
+        return;
       }
-      this.emit("close");
-      resolve();
+
+      server.close(() => {
+        this.emit("close");
+        resolve();
+      });
     });
   }
 
@@ -94,7 +122,9 @@ export class WebServer extends EventEmitter {
     });
 
     try {
-      const request = await parseHttpRequest(socket);
+      const request = await parseHttpRequest(socket, {
+        timeoutMs: this.config.requestTimeoutMs,
+      });
 
       if (!this.config.quiet) {
         const addr = socket.remoteAddress ?? "?";
