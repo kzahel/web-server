@@ -1,2 +1,6 @@
-export { NodeTcpSocket, NodeTcpServer, NodeSocketFactory } from './node-socket.js'
-export { NodeFileHandle, NodeFileSystem } from './node-filesystem.js'
+export { NodeFileHandle, NodeFileSystem } from "./node-filesystem.js";
+export {
+  NodeSocketFactory,
+  NodeTcpServer,
+  NodeTcpSocket,
+} from "./node-socket.js";

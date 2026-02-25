@@ -6,10 +6,10 @@
  */
 
 export interface IFileStat {
-  size: number
-  mtime: Date
-  isDirectory: boolean
-  isFile: boolean
+  size: number;
+  mtime: Date;
+  isDirectory: boolean;
+  isFile: boolean;
 }
 
 export interface IFileHandle {
@@ -19,7 +19,7 @@ export interface IFileHandle {
     offset: number,
     length: number,
     position: number,
-  ): Promise<{ bytesRead: number }>
+  ): Promise<{ bytesRead: number }>;
 
   /** Write data to the file at a specific position. */
   write(
@@ -27,40 +27,40 @@ export interface IFileHandle {
     offset: number,
     length: number,
     position: number,
-  ): Promise<{ bytesWritten: number }>
+  ): Promise<{ bytesWritten: number }>;
 
   /** Truncate the file to a specific size. */
-  truncate(len: number): Promise<void>
+  truncate(len: number): Promise<void>;
 
   /** Flush changes to storage. */
-  sync(): Promise<void>
+  sync(): Promise<void>;
 
   /** Close the file handle. */
-  close(): Promise<void>
+  close(): Promise<void>;
 }
 
 export interface IFileSystem {
   /** Open a file. */
-  open(path: string, mode: 'r' | 'w' | 'r+'): Promise<IFileHandle>
+  open(path: string, mode: "r" | "w" | "r+"): Promise<IFileHandle>;
 
   /** Get file statistics. */
-  stat(path: string): Promise<IFileStat>
+  stat(path: string): Promise<IFileStat>;
 
   /** Create a directory. */
-  mkdir(path: string): Promise<void>
+  mkdir(path: string): Promise<void>;
 
   /** Check if a path exists. */
-  exists(path: string): Promise<boolean>
+  exists(path: string): Promise<boolean>;
 
   /** Read directory contents. Returns list of filenames (not full paths). */
-  readdir(path: string): Promise<string[]>
+  readdir(path: string): Promise<string[]>;
 
   /** Delete a file or directory. */
-  delete(path: string): Promise<void>
+  delete(path: string): Promise<void>;
 
   /**
    * Recursively list all files under a directory with their sizes.
    * Returns paths relative to the given path.
    */
-  listTree(path: string): Promise<Array<{ path: string; size: number }>>
+  listTree(path: string): Promise<Array<{ path: string; size: number }>>;
 }

@@ -1,58 +1,63 @@
 #!/usr/bin/env node
 
-import { createNodeServer, defaultConfig, prefixedLogger, basicLogger } from '@ok200/engine'
-import * as path from 'path'
+import * as path from "node:path";
+import {
+  basicLogger,
+  createNodeServer,
+  defaultConfig,
+  prefixedLogger,
+} from "@ok200/engine";
 
 function parseArgs(args: string[]): {
-  root: string
-  port: number
-  host: string
-  cors: boolean
-  spa: boolean
-  noListing: boolean
-  quiet: boolean
+  root: string;
+  port: number;
+  host: string;
+  cors: boolean;
+  spa: boolean;
+  noListing: boolean;
+  quiet: boolean;
 } {
-  let root = '.'
-  let port = 8080
-  let host = '127.0.0.1'
-  let cors = false
-  let spa = false
-  let noListing = false
-  let quiet = false
+  let root = ".";
+  let port = 8080;
+  let host = "127.0.0.1";
+  let cors = false;
+  let spa = false;
+  let noListing = false;
+  let quiet = false;
 
-  let i = 0
+  let i = 0;
   while (i < args.length) {
-    const arg = args[i]
-    if (arg === '--port' || arg === '-p') {
-      port = parseInt(args[++i], 10)
-      if (isNaN(port)) {
-        console.error('Invalid port number')
-        process.exit(1)
+    const arg = args[i];
+    if (arg === "--port" || arg === "-p") {
+      port = parseInt(args[++i], 10);
+      if (Number.isNaN(port)) {
+        console.error("Invalid port number");
+        process.exit(1);
       }
-    } else if (arg === '--host' || arg === '-H') {
-      host = args[++i]
-    } else if (arg === '--cors') {
-      cors = true
-    } else if (arg === '--spa') {
-      spa = true
-    } else if (arg === '--no-listing') {
-      noListing = true
-    } else if (arg === '--quiet' || arg === '-q') {
-      quiet = true
-    } else if (arg === '--help' || arg === '-h') {
-      printHelp()
-      process.exit(0)
-    } else if (!arg.startsWith('-')) {
-      root = arg
+    } else if (arg === "--host" || arg === "-H") {
+      host = args[++i];
+    } else if (arg === "--cors") {
+      cors = true;
+    } else if (arg === "--spa") {
+      spa = true;
+    } else if (arg === "--no-listing") {
+      noListing = true;
+    } else if (arg === "--quiet" || arg === "-q") {
+      quiet = true;
+    } else if (arg === "--help" || arg === "-h") {
+      printHelp();
+      process.exit(0);
+    } else if (!arg.startsWith("-")) {
+      root = arg;
     } else {
-      console.error(`Unknown option: ${arg}`)
-      printHelp()
-      process.exit(1)
+      console.error(`Unknown option: ${arg}`);
+      printHelp();
+      process.exit(1);
     }
-    i++
+    i++;
   }
 
-  return { root, port, host, cors, spa, noListing, quiet }
+  return { root, port, host, cors, spa, noListing, quiet };
 }
 
 function printHelp(): void {
@@ -69,12 +74,12 @@ Options:
   --no-listing         Disable directory listing
   --quiet, -q          Suppress request logging
   --help, -h           Show this help
-`)
+`);
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2))
-  const root = path.resolve(args.root)
+  const args = parseArgs(process.argv.slice(2));
+  const root = path.resolve(args.root);
 
   const config = {
     ...defaultConfig(root),
@@ -84,35 +89,40 @@ async function main(): Promise<void> {
     spa: args.spa,
     directoryListing: !args.noListing,
     quiet: args.quiet,
-  }
+  };
 
   const logger = args.quiet
-    ? { debug: () => {}, info: () => {}, warn: console.warn, error: console.error }
-    : prefixedLogger('ok200', basicLogger())
+    ? {
+        debug: () => {},
+        info: () => {},
+        warn: console.warn,
+        error: console.error,
+      }
+    : prefixedLogger("ok200", basicLogger());
 
-  const server = createNodeServer({ config, logger })
+  const server = createNodeServer({ config, logger });
 
-  const port = await server.start()
+  const port = await server.start();
 
-  const url = `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${port}`
-  console.log(`\n  ok200 serving ${root}\n`)
-  console.log(`  Local:   ${url}`)
-  if (config.host === '0.0.0.0') {
-    console.log(`  Network: http://0.0.0.0:${port}`)
+  const url = `http://${config.host === "0.0.0.0" ? "localhost" : config.host}:${port}`;
+  console.log(`\n  ok200 serving ${root}\n`);
+  console.log(`  Local:   ${url}`);
+  if (config.host === "0.0.0.0") {
+    console.log(`  Network: http://0.0.0.0:${port}`);
   }
-  console.log()
+  console.log();
 
   const shutdown = async () => {
-    console.log('\nShutting down...')
-    await server.stop()
-    process.exit(0)
-  }
+    console.log("\nShutting down...");
+    await server.stop();
+    process.exit(0);
+  };
 
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err)
-  process.exit(1)
-})
+  console.error("Fatal error:", err);
+  process.exit(1);
+});

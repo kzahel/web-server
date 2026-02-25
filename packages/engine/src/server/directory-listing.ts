@@ -1,8 +1,8 @@
-import type { IFileSystem, IFileStat } from '../interfaces/filesystem.js'
+import type { IFileStat, IFileSystem } from "../interfaces/filesystem.js";
 
 interface DirEntry {
-  name: string
-  stat: IFileStat
+  name: string;
+  stat: IFileStat;
 }
 
 export async function generateDirectoryListing(
@@ -10,14 +10,16 @@ export async function generateDirectoryListing(
   dirPath: string,
   urlPath: string,
 ): Promise<string> {
-  const names = await fs.readdir(dirPath)
+  const names = await fs.readdir(dirPath);
 
-  const entries: DirEntry[] = []
+  const entries: DirEntry[] = [];
   for (const name of names) {
     try {
-      const fullPath = dirPath.endsWith('/') ? dirPath + name : dirPath + '/' + name
-      const stat = await fs.stat(fullPath)
-      entries.push({ name, stat })
+      const fullPath = dirPath.endsWith("/")
+        ? dirPath + name
+        : `${dirPath}/${name}`;
+      const stat = await fs.stat(fullPath);
+      entries.push({ name, stat });
     } catch {
       // Skip entries we can't stat
     }
@@ -25,23 +27,33 @@ export async function generateDirectoryListing(
 
   // Sort: directories first, then alphabetical
   entries.sort((a, b) => {
-    if (a.stat.isDirectory && !b.stat.isDirectory) return -1
-    if (!a.stat.isDirectory && b.stat.isDirectory) return 1
-    return a.name.localeCompare(b.name)
-  })
+    if (a.stat.isDirectory && !b.stat.isDirectory) return -1;
+    if (!a.stat.isDirectory && b.stat.isDirectory) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
-  const displayPath = urlPath === '/' ? '/' : urlPath
-  const parentLink = urlPath === '/'
-    ? ''
-    : `<tr><td><a href="${encodeURI(urlPath.replace(/\/[^/]*\/?$/, '/') || '/')}">../</a></td><td></td><td></td></tr>\n`
+  const displayPath = urlPath === "/" ? "/" : urlPath;
+  const parentLink =
+    urlPath === "/"
+      ? ""
+      : `<tr><td><a href="${encodeURI(urlPath.replace(/\/[^/]*\/?$/, "/") || "/")}">../</a></td><td></td><td></td></tr>\n`;
 
-  const rows = entries.map((entry) => {
-    const name = entry.stat.isDirectory ? entry.name + '/' : entry.name
-    const href = encodeURI((urlPath.endsWith('/') ? urlPath : urlPath + '/') + entry.name + (entry.stat.isDirectory ? '/' : ''))
-    const size = entry.stat.isDirectory ? '-' : formatSize(entry.stat.size)
-    const mtime = entry.stat.mtime.toISOString().replace('T', ' ').substring(0, 19)
-    return `<tr><td><a href="${href}">${escapeHtml(name)}</a></td><td>${size}</td><td>${mtime}</td></tr>`
-  }).join('\n')
+  const rows = entries
+    .map((entry) => {
+      const name = entry.stat.isDirectory ? `${entry.name}/` : entry.name;
+      const href = encodeURI(
+        (urlPath.endsWith("/") ? urlPath : `${urlPath}/`) +
+          entry.name +
+          (entry.stat.isDirectory ? "/" : ""),
+      );
+      const size = entry.stat.isDirectory ? "-" : formatSize(entry.stat.size);
+      const mtime = entry.stat.mtime
+        .toISOString()
+        .replace("T", " ")
+        .substring(0, 19);
+      return `<tr><td><a href="${href}">${escapeHtml(name)}</a></td><td>${size}</td><td>${mtime}</td></tr>`;
+    })
+    .join("\n");
 
   return `<!DOCTYPE html>
 <html>
@@ -69,20 +81,21 @@ ${parentLink}${rows}
 </tbody>
 </table>
 </body>
-</html>`
+</html>`;
 }
 
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function escapeHtml(str: string): string {
   return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
