@@ -9,6 +9,12 @@ export interface ITcpSocket {
   /** Send data to the remote peer. */
   send(data: Uint8Array): void;
 
+  /**
+   * Send data and resolve when it has been accepted without backpressure.
+   * Implementations can use this to expose drain-aware writes for streaming.
+   */
+  sendAndWait?(data: Uint8Array): Promise<void>;
+
   /** Register a callback for incoming data. */
   onData(cb: (data: Uint8Array) => void): void;
 

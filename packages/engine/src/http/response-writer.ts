@@ -51,7 +51,7 @@ export async function sendFileResponse(
     response.statusText,
     headers,
   );
-  socket.send(headerBytes);
+  await sendChunk(socket, headerBytes);
 
   const CHUNK_SIZE = 64 * 1024; // 64KB chunks
   const buffer = new Uint8Array(CHUNK_SIZE);
@@ -63,10 +63,18 @@ export async function sendFileResponse(
     const { bytesRead } = await fileHandle.read(buffer, 0, toRead, position);
     if (bytesRead === 0) break;
 
-    socket.send(buffer.subarray(0, bytesRead));
+    await sendChunk(socket, buffer.subarray(0, bytesRead));
     position += bytesRead;
     remaining -= bytesRead;
   }
+}
+
+async function sendChunk(socket: ITcpSocket, data: Uint8Array): Promise<void> {
+  if (socket.sendAndWait) {
+    await socket.sendAndWait(data);
+    return;
+  }
+  socket.send(data);
 }
 
 function buildHeaderBytes(

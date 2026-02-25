@@ -39,6 +39,11 @@ class InMemoryTcpSocket implements ITcpSocket {
     });
   }
 
+  sendAndWait(data: Uint8Array): Promise<void> {
+    this.send(data);
+    return Promise.resolve();
+  }
+
   onData(cb: (data: Uint8Array) => void): void {
     this.dataCallbacks.push(cb);
   }

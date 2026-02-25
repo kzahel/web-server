@@ -57,6 +57,54 @@ export class NodeTcpSocket implements ITcpSocket {
     }
   }
 
+  sendAndWait(data: Uint8Array): Promise<void> {
+    if (this.socket.destroyed || !this.socket.writable) {
+      return Promise.reject(new Error("Socket is not writable"));
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const fail = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      };
+
+      const onDrain = () => done();
+      const onClose = () => fail(new Error("Socket closed during write"));
+      const onError = (err: Error) => fail(err);
+
+      const cleanup = () => {
+        this.socket.off("drain", onDrain);
+        this.socket.off("close", onClose);
+        this.socket.off("error", onError);
+      };
+
+      this.socket.once("close", onClose);
+      this.socket.once("error", onError);
+
+      try {
+        const accepted = this.socket.write(data);
+        if (accepted) {
+          done();
+        } else {
+          this.socket.once("drain", onDrain);
+        }
+      } catch (err) {
+        fail(err instanceof Error ? err : new Error(String(err)));
+      }
+    });
+  }
+
   onData(cb: (data: Uint8Array) => void): void {
     this.dataCallbacks.push(cb);
     this.socket.on("data", (data) => {
