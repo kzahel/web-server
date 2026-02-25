@@ -1,0 +1,10 @@
+{
+  "name": "app.ok200.native",
+  "description": "200 OK Web Server Native Messaging Host",
+  "path": "HOST_PATH_PLACEHOLDER",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://PLACEHOLDER_STABLE_ID/",
+    "chrome-extension://PLACEHOLDER_DEV_ID/"
+  ]
+}

@@ -3,3 +3,7 @@ node_modules/
 dist/
 .vite/
 references/
+desktop/target/
+desktop/tauri-app/src-tauri/binaries/
+desktop/tauri-app/src-tauri/gen/
+apps/update-server/logs/

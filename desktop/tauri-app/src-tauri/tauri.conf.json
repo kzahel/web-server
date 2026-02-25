@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "200 OK",
+  "version": "0.1.0",
+  "identifier": "app.ok200.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm prepare-sidecar && pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm prepare-sidecar && pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "200 OK",
+        "width": 800,
+        "height": 600,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "externalBin": ["binaries/ok200-host"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Kyle Graehl (VD7BYQ6ABM)"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./nsis/hooks.nsh"
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://updates.ok200.app/tauri/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "GENERATE_NEW_KEYPAIR"
+    }
+  }
+}

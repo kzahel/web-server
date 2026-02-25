@@ -1,0 +1,11 @@
+[package]
+name = "ok200-common"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dirs = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

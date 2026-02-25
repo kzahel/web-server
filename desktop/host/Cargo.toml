@@ -1,0 +1,16 @@
+[package]
+name = "ok200-host"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ok200-common = { path = "../common" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ok200-host"
+path = "src/main.rs"
