@@ -145,6 +145,34 @@ describe("parseHttpRequest", () => {
     expect(second.url).toBe("/two");
   });
 
+  it("streams request body chunks via consumeBody", async () => {
+    const socket = chunkedMockSocket([
+      "PUT /upload.bin HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\nhel",
+      "lo ",
+      "world",
+    ]);
+    const parser = createHttpRequestParser(socket);
+
+    const head = await parser.readRequestHead();
+    const chunks: Uint8Array[] = [];
+    await parser.consumeBody(head.contentLength, async (chunk) => {
+      chunks.push(chunk);
+    });
+
+    const body = new TextDecoder().decode(
+      chunks.reduce((acc, chunk) => {
+        const next = new Uint8Array(acc.length + chunk.length);
+        next.set(acc, 0);
+        next.set(chunk, acc.length);
+        return next;
+      }, new Uint8Array(0)),
+    );
+
+    expect(head.method).toBe("PUT");
+    expect(head.url).toBe("/upload.bin");
+    expect(body).toBe("hello world");
+  });
+
   it("times out incomplete requests", async () => {
     const socket: ITcpSocket = {
       send() {},

@@ -15,6 +15,7 @@ export interface HttpResponseOptions {
 
 export const STATUS_TEXT: Record<number, string> = {
   200: "OK",
+  201: "Created",
   204: "No Content",
   206: "Partial Content",
   301: "Moved Permanently",

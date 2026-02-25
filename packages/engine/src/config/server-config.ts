@@ -13,8 +13,12 @@ export interface ServerConfig {
   directoryListing: boolean;
   /** Suppress request logging. Default: false */
   quiet: boolean;
+  /** Enable file uploads via PUT/POST. Default: false */
+  upload: boolean;
   /** Max time allowed for receiving a full HTTP request. Default: 5000ms */
   requestTimeoutMs: number;
+  /** Max buffered request body size for non-streaming handlers. Default: 10MB */
+  maxRequestBodySize: number;
 }
 
 export function defaultConfig(root: string): ServerConfig {
@@ -26,6 +30,8 @@ export function defaultConfig(root: string): ServerConfig {
     spa: false,
     directoryListing: true,
     quiet: false,
+    upload: false,
     requestTimeoutMs: 5000,
+    maxRequestBodySize: 10 * 1024 * 1024,
   };
 }

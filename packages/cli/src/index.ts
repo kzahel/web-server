@@ -14,6 +14,7 @@ function parseArgs(args: string[]): {
   host: string;
   cors: boolean;
   spa: boolean;
+  upload: boolean;
   noListing: boolean;
   quiet: boolean;
 } {
@@ -22,6 +23,7 @@ function parseArgs(args: string[]): {
   let host = "127.0.0.1";
   let cors = false;
   let spa = false;
+  let upload = false;
   let noListing = false;
   let quiet = false;
 
@@ -40,6 +42,8 @@ function parseArgs(args: string[]): {
       cors = true;
     } else if (arg === "--spa") {
       spa = true;
+    } else if (arg === "--upload") {
+      upload = true;
     } else if (arg === "--no-listing") {
       noListing = true;
     } else if (arg === "--quiet" || arg === "-q") {
@@ -57,7 +61,7 @@ function parseArgs(args: string[]): {
     i++;
   }
 
-  return { root, port, host, cors, spa, noListing, quiet };
+  return { root, port, host, cors, spa, upload, noListing, quiet };
 }
 
 function printHelp(): void {
@@ -71,6 +75,7 @@ Options:
   --host, -H <host>    Host to bind (default: 127.0.0.1)
   --cors               Enable CORS headers
   --spa                SPA mode: serve index.html for missing paths
+  --upload             Enable file uploads via PUT/POST
   --no-listing         Disable directory listing
   --quiet, -q          Suppress request logging
   --help, -h           Show this help
@@ -87,6 +92,7 @@ async function main(): Promise<void> {
     host: args.host,
     cors: args.cors,
     spa: args.spa,
+    upload: args.upload,
     directoryListing: !args.noListing,
     quiet: args.quiet,
   };

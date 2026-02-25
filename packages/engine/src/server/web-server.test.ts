@@ -9,6 +9,7 @@ import type {
   ITcpServer,
   ITcpSocket,
 } from "../interfaces/socket.js";
+import { InMemoryFileSystem } from "../testing/in-memory-filesystem.js";
 import { InMemorySocketFactory } from "../testing/in-memory-socket-factory.js";
 import { decodeToString } from "../utils/buffer.js";
 import { WebServer } from "./web-server.js";
@@ -486,6 +487,79 @@ describe("WebServer CORS (in-memory)", () => {
       expect(res.headers.get("access-control-allow-origin")).toBe("*");
       expect(res.body).toBe("");
     });
+  });
+});
+
+describe("WebServer uploads (in-memory fs)", () => {
+  it("streams PUT request body chunks directly to disk when upload is enabled", async () => {
+    const socketFactory = new InMemorySocketFactory();
+    const fileSystem = new InMemoryFileSystem();
+    await fileSystem.mkdir("/srv");
+
+    const server = new WebServer({
+      socketFactory,
+      fileSystem,
+      config: {
+        ...defaultConfig("/srv"),
+        quiet: true,
+        port: 0,
+        upload: true,
+      },
+    });
+
+    await server.start();
+    try {
+      const responseRaw = await socketFactory.requestChunks([
+        "PUT /upload.txt HTTP/1.1\r\nHost: local\r\nContent-Length: 21\r\nConnection: close\r\n\r\n",
+        "hello ",
+        "streaming ",
+        "world",
+      ]);
+
+      const res = parseResponse(responseRaw);
+      expect(res.status).toBe(201);
+      expect(res.body).toBe("");
+
+      const file = await fileSystem.readFile("/srv/upload.txt");
+      expect(decodeToString(file)).toBe("hello streaming world");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("keeps connection alive across PUT upload and subsequent GET", async () => {
+    const socketFactory = new InMemorySocketFactory();
+    const fileSystem = new InMemoryFileSystem();
+    await fileSystem.mkdir("/srv");
+
+    const server = new WebServer({
+      socketFactory,
+      fileSystem,
+      config: {
+        ...defaultConfig("/srv"),
+        quiet: true,
+        port: 0,
+        upload: true,
+      },
+    });
+
+    await server.start();
+    try {
+      const raw = await socketFactory.requestChunks([
+        "PUT /pipe.txt HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\n",
+        "hello",
+        "GET /pipe.txt HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+      ]);
+
+      const responses = parseResponses(raw);
+      expect(responses).toHaveLength(2);
+      expect(responses[0].status).toBe(201);
+      expect(responses[0].headers.get("connection")).toBe("keep-alive");
+      expect(responses[1].status).toBe(200);
+      expect(responses[1].body).toBe("hello");
+    } finally {
+      await server.stop();
+    }
   });
 });
 

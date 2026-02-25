@@ -161,11 +161,19 @@ export class InMemorySocketFactory implements ISocketFactory {
   }
 
   async request(rawHttp: string | Uint8Array): Promise<Uint8Array> {
+    return this.requestChunks([rawHttp]);
+  }
+
+  async requestChunks(
+    rawChunks: Array<string | Uint8Array>,
+  ): Promise<Uint8Array> {
     if (!this.server || !this.server.isListening()) {
       throw new Error("In-memory server is not listening");
     }
 
-    const payload = typeof rawHttp === "string" ? fromString(rawHttp) : rawHttp;
+    const payloads = rawChunks.map((raw) =>
+      typeof raw === "string" ? fromString(raw) : raw,
+    );
     const [clientSocket, serverSocket] = InMemoryTcpSocket.createPair();
 
     return new Promise((resolve, reject) => {
@@ -205,7 +213,11 @@ export class InMemorySocketFactory implements ISocketFactory {
         return;
       }
 
-      queueMicrotask(() => clientSocket.send(payload));
+      queueMicrotask(() => {
+        for (const payload of payloads) {
+          clientSocket.send(payload);
+        }
+      });
     });
   }
 }

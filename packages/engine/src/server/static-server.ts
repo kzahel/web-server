@@ -1,3 +1,4 @@
+import { HttpRequestParseError } from "../http/request-parser.js";
 import { sendFileResponse, sendResponse } from "../http/response-writer.js";
 import type { HttpRequest } from "../http/types.js";
 import { STATUS_TEXT } from "../http/types.js";
@@ -14,11 +15,18 @@ export interface StaticServerOptions {
   directoryListing: boolean;
   spa: boolean;
   cors: boolean;
+  upload: boolean;
   logger?: Logger;
+}
+
+export interface HttpRequestBodyConsumer {
+  contentLength: number;
+  consume(onChunk: (chunk: Uint8Array) => Promise<void> | void): Promise<void>;
 }
 
 export interface StaticRequestOptions {
   connectionHeader?: "keep-alive" | "close";
+  bodyConsumer?: HttpRequestBodyConsumer;
 }
 
 type RangeParseResult =
@@ -32,6 +40,7 @@ export class StaticServer {
   private directoryListing: boolean;
   private spa: boolean;
   private cors: boolean;
+  private upload: boolean;
   private logger?: Logger;
   private resolvedRootPromise: Promise<string> | null = null;
 
@@ -41,6 +50,7 @@ export class StaticServer {
     this.directoryListing = options.directoryListing;
     this.spa = options.spa;
     this.cors = options.cors;
+    this.upload = options.upload;
     this.logger = options.logger;
   }
 
@@ -58,7 +68,7 @@ export class StaticServer {
 
     if (this.cors) {
       extraHeaders.set("access-control-allow-origin", "*");
-      extraHeaders.set("access-control-allow-methods", "GET, HEAD, OPTIONS");
+      extraHeaders.set("access-control-allow-methods", this.allowedMethods());
       extraHeaders.set("access-control-allow-headers", "*");
     }
 
@@ -71,8 +81,26 @@ export class StaticServer {
       return;
     }
 
+    if (request.method === "PUT" || request.method === "POST") {
+      if (!this.upload) {
+        extraHeaders.set("allow", this.allowedMethods());
+        this.sendTextResponse(
+          socket,
+          request,
+          405,
+          STATUS_TEXT[405],
+          extraHeaders,
+          "Method Not Allowed",
+        );
+        return;
+      }
+
+      await this.handleUploadRequest(socket, request, extraHeaders, options);
+      return;
+    }
+
     if (request.method !== "GET" && request.method !== "HEAD") {
-      extraHeaders.set("allow", "GET, HEAD, OPTIONS");
+      extraHeaders.set("allow", this.allowedMethods());
       this.sendTextResponse(
         socket,
         request,
@@ -220,6 +248,165 @@ export class StaticServer {
     );
   }
 
+  private async handleUploadRequest(
+    socket: ITcpSocket,
+    request: HttpRequest,
+    extraHeaders: Map<string, string>,
+    options?: StaticRequestOptions,
+  ): Promise<void> {
+    const bodyConsumer = options?.bodyConsumer;
+    const drainBody = async (): Promise<void> => {
+      try {
+        await this.consumeRequestBody(request, bodyConsumer, async () => {});
+      } catch {
+        // Ignore body drain failures when returning an error response.
+      }
+    };
+
+    const urlPath = decodeRequestPath(request.url);
+    if (!urlPath) {
+      await drainBody();
+      this.sendTextResponse(
+        socket,
+        request,
+        400,
+        STATUS_TEXT[400],
+        extraHeaders,
+        "Bad Request",
+      );
+      return;
+    }
+
+    if (urlPath === "/" || urlPath.endsWith("/")) {
+      await drainBody();
+      this.sendTextResponse(
+        socket,
+        request,
+        400,
+        STATUS_TEXT[400],
+        extraHeaders,
+        "Upload target must be a file path",
+      );
+      return;
+    }
+
+    const fsPath = joinRootAndUrlPath(this.root, urlPath);
+    const parentPath = parentPathOf(fsPath);
+
+    try {
+      const parentExists = await this.fs.exists(parentPath);
+      if (!parentExists) {
+        await drainBody();
+        this.sendTextResponse(
+          socket,
+          request,
+          404,
+          STATUS_TEXT[404],
+          extraHeaders,
+          "Not Found",
+        );
+        return;
+      }
+
+      const parentStat = await this.fs.stat(parentPath);
+      if (!parentStat.isDirectory) {
+        await drainBody();
+        this.sendTextResponse(
+          socket,
+          request,
+          400,
+          STATUS_TEXT[400],
+          extraHeaders,
+          "Bad Request",
+        );
+        return;
+      }
+
+      const parentAllowed = await this.isPathInsideRoot(parentPath);
+      if (!parentAllowed) {
+        await drainBody();
+        this.sendTextResponse(
+          socket,
+          request,
+          403,
+          STATUS_TEXT[403],
+          extraHeaders,
+          "Forbidden",
+        );
+        return;
+      }
+
+      let existed = false;
+      const targetExists = await this.fs.exists(fsPath);
+      if (targetExists) {
+        const targetStat = await this.fs.stat(fsPath);
+        if (targetStat.isDirectory) {
+          await drainBody();
+          this.sendTextResponse(
+            socket,
+            request,
+            400,
+            STATUS_TEXT[400],
+            extraHeaders,
+            "Bad Request",
+          );
+          return;
+        }
+
+        const targetAllowed = await this.isPathInsideRoot(fsPath);
+        if (!targetAllowed) {
+          await drainBody();
+          this.sendTextResponse(
+            socket,
+            request,
+            403,
+            STATUS_TEXT[403],
+            extraHeaders,
+            "Forbidden",
+          );
+          return;
+        }
+        existed = true;
+      }
+
+      const handle = await this.fs.open(fsPath, "w");
+      let position = 0;
+      try {
+        await this.consumeRequestBody(
+          request,
+          bodyConsumer,
+          async (chunk: Uint8Array) => {
+            if (chunk.length === 0) return;
+            await handle.write(chunk, 0, chunk.length, position);
+            position += chunk.length;
+          },
+        );
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+
+      sendResponse(socket, {
+        status: existed ? 200 : 201,
+        statusText: existed ? STATUS_TEXT[200] : STATUS_TEXT[201],
+        headers: extraHeaders,
+      });
+    } catch (err) {
+      await drainBody();
+      const status = err instanceof HttpRequestParseError ? 400 : 500;
+      const statusText = STATUS_TEXT[status];
+      this.logger?.error("Error handling upload request:", err);
+      this.sendTextResponse(
+        socket,
+        request,
+        status,
+        statusText,
+        extraHeaders,
+        statusText,
+      );
+    }
+  }
+
   private async serveFile(
     socket: ITcpSocket,
     request: HttpRequest,
@@ -333,6 +520,28 @@ export class StaticServer {
     }
   }
 
+  private async consumeRequestBody(
+    request: HttpRequest,
+    bodyConsumer: HttpRequestBodyConsumer | undefined,
+    onChunk: (chunk: Uint8Array) => Promise<void> | void,
+  ): Promise<void> {
+    if (bodyConsumer) {
+      await bodyConsumer.consume(onChunk);
+      return;
+    }
+
+    if (request.body && request.body.length > 0) {
+      await onChunk(request.body);
+    }
+  }
+
+  private allowedMethods(): string {
+    if (this.upload) {
+      return "GET, HEAD, OPTIONS, PUT, POST";
+    }
+    return "GET, HEAD, OPTIONS";
+  }
+
   private sendTextResponse(
     socket: ITcpSocket,
     request: HttpRequest,
@@ -441,6 +650,14 @@ function joinRootAndUrlPath(root: string, urlPath: string): string {
     return `${root}${suffix}`;
   }
   return `${root}/${suffix}`;
+}
+
+function parentPathOf(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  if (normalized === "/") return "/";
+  const idx = normalized.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return normalized.slice(0, idx);
 }
 
 function normalizePathForComparison(path: string): string {

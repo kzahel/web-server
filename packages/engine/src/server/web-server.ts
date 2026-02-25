@@ -1,6 +1,7 @@
 import type { ServerConfig } from "../config/server-config.js";
 import {
   createHttpRequestParser,
+  type HttpRequestHead,
   HttpRequestParseError,
 } from "../http/request-parser.js";
 import { sendResponse } from "../http/response-writer.js";
@@ -47,6 +48,7 @@ export class WebServer extends EventEmitter {
       directoryListing: this.config.directoryListing,
       spa: this.config.spa,
       cors: this.config.cors,
+      upload: this.config.upload,
       logger: this.logger,
     });
   }
@@ -129,28 +131,24 @@ export class WebServer extends EventEmitter {
 
     try {
       while (true) {
-        let request: HttpRequest;
+        let requestHead: HttpRequestHead;
         try {
-          request = await parser.readRequest({
+          requestHead = await parser.readRequestHead({
             timeoutMs: this.config.requestTimeoutMs,
           });
         } catch (err) {
-          if (
-            err instanceof HttpRequestParseError &&
-            (err.code === "IDLE_TIMEOUT" ||
-              err.code === "CONNECTION_CLOSED" ||
-              err.code === "CONNECTION_CLOSED_INCOMPLETE")
-          ) {
+          const outcome = classifyRequestParseFailure(err);
+          if (outcome === "close") {
             break;
           }
 
-          // Parsing failed — send 400 if socket is still open.
+          // Parsing failed — send error if socket is still open.
           try {
             sendResponse(socket, {
-              status: 400,
-              statusText: STATUS_TEXT[400],
+              status: outcome,
+              statusText: STATUS_TEXT[outcome],
               headers: new Map([["connection", "close"]]),
-              body: fromString("Bad Request"),
+              body: fromString(STATUS_TEXT[outcome]),
             });
           } catch {
             // Socket already closed
@@ -158,15 +156,78 @@ export class WebServer extends EventEmitter {
           break;
         }
 
+        const requestBase: HttpRequest = {
+          method: requestHead.method,
+          url: requestHead.url,
+          httpVersion: requestHead.httpVersion,
+          headers: requestHead.headers,
+        };
+
         if (!this.config.quiet) {
           const addr = socket.remoteAddress ?? "?";
-          this.logger.info(`${request.method} ${request.url} - ${addr}`);
+          this.logger.info(
+            `${requestBase.method} ${requestBase.url} - ${addr}`,
+          );
         }
 
-        const keepAlive = shouldKeepAlive(request.httpVersion, request.headers);
-        await this.staticServer.handleRequest(socket, request, {
-          connectionHeader: keepAlive ? "keep-alive" : "close",
-        });
+        const keepAlive = shouldKeepAlive(
+          requestBase.httpVersion,
+          requestBase.headers,
+        );
+        const connectionHeader = keepAlive ? "keep-alive" : "close";
+
+        const isUploadRequest =
+          this.config.upload &&
+          (requestBase.method === "PUT" || requestBase.method === "POST");
+
+        if (isUploadRequest) {
+          await this.staticServer.handleRequest(socket, requestBase, {
+            connectionHeader,
+            bodyConsumer: {
+              contentLength: requestHead.contentLength,
+              consume: async (onChunk) =>
+                parser.consumeBody(requestHead.contentLength, onChunk, {
+                  timeoutMs: this.config.requestTimeoutMs,
+                }),
+            },
+          });
+        } else {
+          let body: Uint8Array | undefined;
+          try {
+            if (requestHead.contentLength > 0) {
+              body = await parser.readBody(requestHead.contentLength, {
+                timeoutMs: this.config.requestTimeoutMs,
+                maxBodySize: this.config.maxRequestBodySize,
+              });
+            }
+          } catch (err) {
+            const outcome = classifyRequestParseFailure(err);
+            if (outcome === "close") {
+              break;
+            }
+
+            try {
+              sendResponse(socket, {
+                status: outcome,
+                statusText: STATUS_TEXT[outcome],
+                headers: new Map([["connection", "close"]]),
+                body: fromString(STATUS_TEXT[outcome]),
+              });
+            } catch {
+              // Socket already closed
+            }
+            break;
+          }
+
+          await this.staticServer.handleRequest(
+            socket,
+            {
+              ...requestBase,
+              body,
+            },
+            { connectionHeader },
+          );
+        }
 
         if (!keepAlive) {
           break;
@@ -192,4 +253,24 @@ function shouldKeepAlive(
     return connection === "keep-alive";
   }
   return connection !== "close";
+}
+
+function classifyRequestParseFailure(err: unknown): 400 | 413 | "close" {
+  if (!(err instanceof HttpRequestParseError)) {
+    return 400;
+  }
+
+  if (
+    err.code === "IDLE_TIMEOUT" ||
+    err.code === "CONNECTION_CLOSED" ||
+    err.code === "CONNECTION_CLOSED_INCOMPLETE"
+  ) {
+    return "close";
+  }
+
+  if (err.code === "BODY_TOO_LARGE") {
+    return 413;
+  }
+
+  return 400;
 }

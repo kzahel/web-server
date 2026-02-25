@@ -13,6 +13,14 @@ export interface ParseHttpRequestOptions {
   timeoutMs?: number;
 }
 
+export interface HttpRequestHead {
+  method: string;
+  url: string;
+  httpVersion: string;
+  headers: Map<string, string>;
+  contentLength: number;
+}
+
 export type HttpRequestParseErrorCode =
   | "IDLE_TIMEOUT"
   | "REQUEST_TIMEOUT"
@@ -33,8 +41,8 @@ export class HttpRequestParseError extends Error {
   }
 }
 
-interface ParsedRequestResult {
-  request: HttpRequest;
+interface ParsedRequestHeadResult {
+  head: HttpRequestHead;
   bytesConsumed: number;
 }
 
@@ -48,11 +56,10 @@ function findSequence(buffer: Uint8Array, sequence: Uint8Array): number {
   return -1;
 }
 
-function tryParseRequestFromBuffer(
+function tryParseRequestHeadFromBuffer(
   buffer: Uint8Array,
   maxHeaderSize: number,
-  maxBodySize: number,
-): ParsedRequestResult | null {
+): ParsedRequestHeadResult | null {
   const separatorIndex = findSequence(buffer, CRLF_CRLF);
   if (separatorIndex === -1) {
     if (buffer.length > maxHeaderSize) {
@@ -104,21 +111,10 @@ function tryParseRequestFromBuffer(
       "Invalid Content-Length",
     );
   }
-  if (contentLength > maxBodySize) {
-    throw new HttpRequestParseError("BODY_TOO_LARGE", "Request body too large");
-  }
-
-  const bodyStart = separatorIndex + CRLF_CRLF.length;
-  const bodyEnd = bodyStart + contentLength;
-  if (buffer.length < bodyEnd) {
-    return null;
-  }
-
-  const body = contentLength > 0 ? buffer.slice(bodyStart, bodyEnd) : undefined;
 
   return {
-    request: { method, url, httpVersion, headers, body },
-    bytesConsumed: bodyEnd,
+    head: { method, url, httpVersion, headers, contentLength },
+    bytesConsumed: separatorIndex + CRLF_CRLF.length,
   };
 }
 
@@ -147,21 +143,33 @@ export class HttpRequestStreamParser {
   }
 
   async readRequest(options?: ParseHttpRequestOptions): Promise<HttpRequest> {
+    const head = await this.readRequestHead(options);
+    const body =
+      head.contentLength > 0
+        ? await this.readBody(head.contentLength, options)
+        : undefined;
+
+    return {
+      method: head.method,
+      url: head.url,
+      httpVersion: head.httpVersion,
+      headers: head.headers,
+      body,
+    };
+  }
+
+  async readRequestHead(
+    options?: ParseHttpRequestOptions,
+  ): Promise<HttpRequestHead> {
     const maxHeaderSize = options?.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE;
-    const maxBodySize = options?.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
     const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const deadline = Date.now() + timeoutMs;
 
     while (true) {
-      const parsed = tryParseRequestFromBuffer(
-        this.buffer,
-        maxHeaderSize,
-        maxBodySize,
-      );
-
+      const parsed = tryParseRequestHeadFromBuffer(this.buffer, maxHeaderSize);
       if (parsed) {
         this.buffer = this.buffer.slice(parsed.bytesConsumed);
-        return parsed.request;
+        return parsed.head;
       }
 
       if (this.socketError) {
@@ -175,14 +183,14 @@ export class HttpRequestStreamParser {
             "Connection closed",
           );
         }
+
         throw new HttpRequestParseError(
           "CONNECTION_CLOSED_INCOMPLETE",
           "Connection closed before request was complete",
         );
       }
 
-      const remainingMs = deadline - Date.now();
-      const hadActivity = await this.waitForActivity(remainingMs);
+      const hadActivity = await this.waitForActivity(deadline - Date.now());
       if (!hadActivity) {
         if (this.buffer.length === 0) {
           throw new HttpRequestParseError(
@@ -190,6 +198,91 @@ export class HttpRequestStreamParser {
             "Connection idle timed out",
           );
         }
+
+        throw new HttpRequestParseError(
+          "REQUEST_TIMEOUT",
+          "Request timed out before completion",
+        );
+      }
+    }
+  }
+
+  async readBody(
+    contentLength: number,
+    options?: ParseHttpRequestOptions,
+  ): Promise<Uint8Array> {
+    if (contentLength <= 0) {
+      return new Uint8Array(0);
+    }
+
+    const maxBodySize = options?.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
+    if (contentLength > maxBodySize) {
+      throw new HttpRequestParseError(
+        "BODY_TOO_LARGE",
+        "Request body too large",
+      );
+    }
+
+    const body = new Uint8Array(contentLength);
+    let position = 0;
+
+    await this.consumeBody(
+      contentLength,
+      async (chunk) => {
+        body.set(chunk, position);
+        position += chunk.length;
+      },
+      options,
+    );
+
+    return body;
+  }
+
+  async consumeBody(
+    contentLength: number,
+    onChunk: (chunk: Uint8Array) => Promise<void> | void,
+    options?: ParseHttpRequestOptions,
+  ): Promise<void> {
+    if (contentLength <= 0) {
+      return;
+    }
+
+    const maxBodySize = options?.maxBodySize;
+    if (typeof maxBodySize === "number" && contentLength > maxBodySize) {
+      throw new HttpRequestParseError(
+        "BODY_TOO_LARGE",
+        "Request body too large",
+      );
+    }
+
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+
+    let remaining = contentLength;
+
+    while (remaining > 0) {
+      if (this.buffer.length > 0) {
+        const take = Math.min(remaining, this.buffer.length);
+        const chunk = this.buffer.slice(0, take);
+        this.buffer = this.buffer.slice(take);
+        remaining -= take;
+        await onChunk(chunk);
+        continue;
+      }
+
+      if (this.socketError) {
+        throw this.socketError;
+      }
+
+      if (this.closed) {
+        throw new HttpRequestParseError(
+          "CONNECTION_CLOSED_INCOMPLETE",
+          "Connection closed before request was complete",
+        );
+      }
+
+      const hadActivity = await this.waitForActivity(deadline - Date.now());
+      if (!hadActivity) {
         throw new HttpRequestParseError(
           "REQUEST_TIMEOUT",
           "Request timed out before completion",

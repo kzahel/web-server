@@ -173,6 +173,25 @@ describeSocket("ok200 CLI --spa", () => {
   });
 });
 
+describeSocket("ok200 CLI --upload", () => {
+  it("accepts PUT uploads and serves uploaded files", async () => {
+    const s = await startServer(tmpDir, ["-q", "--upload"]);
+    try {
+      const upload = await fetch(`http://127.0.0.1:${s.port}/uploaded.txt`, {
+        method: "PUT",
+        body: "uploaded body",
+      });
+      expect(upload.status).toBe(201);
+
+      const downloaded = await fetch(`http://127.0.0.1:${s.port}/uploaded.txt`);
+      expect(downloaded.status).toBe(200);
+      expect(await downloaded.text()).toBe("uploaded body");
+    } finally {
+      await stopServer(s);
+    }
+  });
+});
+
 describeSocket("ok200 CLI shutdown", () => {
   it("terminates on SIGTERM", async () => {
     const s = await startServer(tmpDir, ["-q"]);

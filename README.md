@@ -10,6 +10,7 @@ ok200 ./dist                   # serve a specific directory
 ok200 --port 3000              # custom port
 ok200 --host 0.0.0.0           # expose on LAN
 ok200 ./dist --spa --cors      # SPA mode with CORS headers
+ok200 ./dist --upload          # enable PUT/POST file uploads
 ```
 
 ## Options
@@ -20,6 +21,7 @@ ok200 ./dist --spa --cors      # SPA mode with CORS headers
 | `--host, -H <host>` | Host to bind | `127.0.0.1` |
 | `--cors` | Enable CORS headers | off |
 | `--spa` | Serve index.html for missing paths | off |
+| `--upload` | Enable file uploads via PUT/POST | off |
 | `--no-listing` | Disable directory listing | off |
 | `--quiet, -q` | Suppress request logging | off |
 | `--help, -h` | Show help | |
