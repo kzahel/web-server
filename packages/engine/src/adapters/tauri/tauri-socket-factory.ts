@@ -46,8 +46,24 @@ export class TauriSocketFactory implements ISocketFactory {
       // Call original to store the callback
       originalListen(port, host, callback);
 
-      // Create a Channel that routes events
+      // Create a Channel that routes events.
+      // Register the server eagerly from channel events, since the Rust side
+      // sends control events (e.g. "listening") before returning the serverId
+      // from invoke, causing a race where handleControlEvent can't find the
+      // server in the map yet.
       const channel = new this.ChannelCtor((event: unknown) => {
+        if (
+          !(event instanceof ArrayBuffer) &&
+          typeof event === "object" &&
+          event !== null &&
+          "serverId" in event
+        ) {
+          const serverId = (event as { serverId: number }).serverId;
+          if (serverId != null && !this.servers.has(serverId)) {
+            server.serverId = serverId;
+            this.servers.set(serverId, server);
+          }
+        }
         this.handleChannelEvent(event);
       });
 

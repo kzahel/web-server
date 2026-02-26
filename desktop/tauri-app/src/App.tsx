@@ -51,6 +51,7 @@ function App() {
         <label>
           Directory
           <input
+            data-testid="dir-input"
             type="text"
             value={root}
             onChange={(e) => setRoot(e.target.value)}
@@ -62,32 +63,38 @@ function App() {
         <label>
           Port
           <input
+            data-testid="port-input"
             type="number"
             value={port}
             onChange={(e) => setPort(Number(e.target.value))}
-            min={1}
+            min={0}
             max={65535}
             disabled={running}
           />
         </label>
 
         {running ? (
-          <button type="button" onClick={handleStop}>
+          <button data-testid="stop-btn" type="button" onClick={handleStop}>
             Stop Server
           </button>
         ) : (
-          <button type="button" onClick={handleStart}>
+          <button data-testid="start-btn" type="button" onClick={handleStart}>
             Start Server
           </button>
         )}
       </div>
 
-      {error && <p className="error">{error}</p>}
+      {error && (
+        <p data-testid="error-msg" className="error">
+          {error}
+        </p>
+      )}
 
       {serverUrl && (
         <p className="status">
           Serving at{" "}
           <a
+            data-testid="server-url"
             href={serverUrl}
             onClick={(e) => {
               e.preventDefault();
