@@ -20,6 +20,23 @@ permissions:
   contents: write
 
 jobs:
+  test-desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './desktop -> target'
+
+      - name: Run Rust tests
+        working-directory: desktop
+        run: cargo test -p ok200-host -p ok200-common
+
   build-tauri:
     strategy:
       fail-fast: false
