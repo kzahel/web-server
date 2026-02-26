@@ -32,6 +32,9 @@ importers:
 
   desktop/tauri-app:
     dependencies:
+      '@ok200/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@tauri-apps/api':
         specifier: ^2
         version: 2.10.1

@@ -12,6 +12,18 @@ export {
   NodeTcpServer,
   NodeTcpSocket,
 } from "./adapters/node/node-socket.js";
+// Tauri adapters
+export {
+  TauriFileHandle,
+  TauriFileSystem,
+} from "./adapters/tauri/tauri-filesystem.js";
+export { TauriSocketFactory } from "./adapters/tauri/tauri-socket-factory.js";
+export { TauriTcpServer } from "./adapters/tauri/tauri-tcp-server.js";
+export { TauriTcpSocket } from "./adapters/tauri/tauri-tcp-socket.js";
+export type {
+  TauriChannelCtor,
+  TauriInvokeFn,
+} from "./adapters/tauri/types.js";
 // Config
 export type { ServerConfig } from "./config/server-config.js";
 export { defaultConfig } from "./config/server-config.js";
@@ -46,6 +58,9 @@ export {
 export type { NodeServerOptions } from "./presets/node.js";
 // Presets
 export { createNodeServer } from "./presets/node.js";
+// Presets — Tauri
+export type { TauriServerOptions } from "./presets/tauri.js";
+export { createTauriServer } from "./presets/tauri.js";
 export type { StaticServerOptions } from "./server/static-server.js";
 export { StaticServer } from "./server/static-server.js";
 export type { WebServerOptions } from "./server/web-server.js";

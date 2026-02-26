@@ -11,6 +11,7 @@
     "prepare-sidecar": "bash scripts/prepare-sidecar.sh"
   },
   "dependencies": {
+    "@ok200/engine": "workspace:*",
     "react": "^19",
     "react-dom": "^19",
     "@tauri-apps/api": "^2",

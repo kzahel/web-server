@@ -17,6 +17,10 @@
     "./presets/native": {
       "types": "./dist/presets/native.d.ts",
       "import": "./dist/presets/native.js"
+    },
+    "./presets/tauri": {
+      "types": "./dist/presets/tauri.d.ts",
+      "import": "./dist/presets/tauri.js"
     }
   },
   "scripts": {
