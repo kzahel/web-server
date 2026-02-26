@@ -212,7 +212,7 @@ jobs:
         if: matrix.platform == 'macos-latest' && startsWith(github.ref, 'refs/tags/desktop-v')
         shell: bash
         env:
-          INSTALLER_IDENTITY: ${{ env.HAS_MACOS_SIGNING == 'true' && 'Developer ID Installer: Kyle Graehl (VD7BYQ6ABM)' || '' }}
+          INSTALLER_IDENTITY: "${{ env.HAS_MACOS_SIGNING == 'true' && 'Developer ID Installer: Kyle Graehl (VD7BYQ6ABM)' || '' }}"
         run: |
           VERSION="${GITHUB_REF_NAME#desktop-v}"
           TARGET="${{ matrix.rust_target }}"
